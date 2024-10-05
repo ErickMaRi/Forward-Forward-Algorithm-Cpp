@@ -35,11 +35,11 @@ F-F_Cpp$ tree
 └── README.md
 ```
 
-1- `gifs` contiene algunos resultados para redes pequeñas.
-2- `histograms` contiene las dos distribuciones de bondades para los conjuntos de datos, por época.
-3- `Imagenet64_train_part1` contiene un segmento de los conjuntos de datos para imagenet de 64 pixeles.
-4- `negative_images` contiene los pngs de 64x64 pixeles a color del conjunto de datos sintetizado.
-5- `positive_images` contiene los pngs de 64x64 pixeles a color del conjunto de datos a estudiar.
+1. `gifs` contiene algunos resultados para redes pequeñas.
+2. `histograms` contiene las dos distribuciones de bondades para los conjuntos de datos, por época.
+3. `Imagenet64_train_part1` contiene un segmento de los conjuntos de datos para imagenet de 64 pixeles.
+4. `negative_images` contiene los pngs de 64x64 pixeles a color del conjunto de datos sintetizado.
+5. `positive_images` contiene los pngs de 64x64 pixeles a color del conjunto de datos a estudiar.
 
 ## Tabla de Contenidos
 
