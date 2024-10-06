@@ -1,5 +1,7 @@
 # Forward-Forward en C++
 
+#### El markdown no muestra correctamente las fórmulas en Github, yo uso el Markdown Editor de zaaack en VSCodium.
+
 Este documento explica la implementación del **Algoritmo Forward-Forward** introducido por Geoffrey Hinton aquí presente. El objetivo es ofrecer una comprensión matemática y conceptual completa de cada componente del código, facilitando así su estudio y aplicación.
 
 ## Árbol de carpetas y archivos sin los datos
