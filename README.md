@@ -5,41 +5,50 @@ Este documento explica la implementación del **Algoritmo Forward-Forward** intr
 ## Árbol de carpetas y archivos sin los datos
 
 ```
-F-F_Cpp$ tree
+F-F_Cpp/ffolder$ tree
 .
-├── ffolder
-│   ├── debugtest
-│   ├── debugtest.cpp
-│   ├── FastNoiseLite.h
-│   ├── ff
-│   ├── forward_forward.cpp
-│   ├── gifs
-│   │   ├── 3neur2reset.gif
-│   │   ├── 3neurnoresetdyn.gif
-│   │   ├── 3neurnoreset.gif
-│   │   ├── outputsingleneur2reset.gif
-│   │   ├── outputsingleneuronnoreset.gif
-│   │   └── singlenoresetdyn.gif
-│   ├── histograms
-│   │   └── hacer gif con los png de la carpeta.txt
-│   ├── Imagenet64_train_part1
-│   │   ├── extraer datos.py
-│   │   └── train_data_batch_1
-│   ├── justnoise
-│   ├── justnoise.cpp
-│   ├── Makefile
+├── data
 │   ├── negative_images
-│   ├── positive_images
-│   ├── README.md
-│   └── singleneuron2resetdyn.gif
-└── README.md
+│   └── positive_images
+├── gifs
+│   ├── 3neur2reset.gif
+│   ├── 3neurnoresetdyn.gif
+│   ├── 3neurnoreset.gif
+│   ├── 512.gif
+│   ├── outputsingleneur2reset.gif
+│   ├── outputsingleneuronnoreset.gif
+│   └── singlenoresetdyn.gif
+├── groovy.bin
+├── histograms
+│   └── hacer gif con los png de la carpeta.txt
+├── Imagenet64_train_part1
+│   ├── extraer datos.py
+│   └── train_data_batch_1
+├── include
+│   ├── FastNoiseLite.h
+│   ├── image_utils.hpp
+│   ├── neural_network.hpp
+│   ├── optimizer.hpp
+│   └── scatter_plot_data.hpp
+├── Makefile
+├── noise
+├── pin.bin
+├── src
+│   ├── image_utils.cpp
+│   ├── main_noise.cpp
+│   ├── main_train.cpp
+│   ├── neural_network.cpp
+│   └── optimizer.cpp
+└── train
+
+8 directories, 25 files
 ```
 
 1. `gifs` contiene algunos resultados para redes pequeñas.
 2. `histograms` contiene las dos distribuciones de bondades para los conjuntos de datos, por época.
-3. `Imagenet64_train_part1` contiene un segmento de los conjuntos de datos para imagenet de 64 pixeles.
-4. `negative_images` contiene los pngs de 64x64 pixeles a color del conjunto de datos sintetizado.
-5. `positive_images` contiene los pngs de 64x64 pixeles a color del conjunto de datos a estudiar.
+3. `Imagenet64_train_part1` contiene un segmento de los conjuntos de datos para imagenet de 64 píxeles.
+4. `negative_images` contiene los PNGs de 64x64 píxeles a color del conjunto de datos sintetizado.
+5. `positive_images` contiene los PNGs de 64x64 píxeles a color del conjunto de datos a estudiar.
 
 ## Tabla de Contenidos
 
@@ -74,13 +83,15 @@ F-F_Cpp$ tree
 
 El **Algoritmo Forward-Forward** es una alternativa al método de **backpropagation** tradicionalmente utilizado para entrenar redes neuronales profundas. Introducido por Geoffrey Hinton, este algoritmo reemplaza las pasadas hacia adelante y hacia atrás de backpropagation por dos pasadas hacia adelante: una con datos positivos (reales) y otra con datos negativos (generados por la red misma o suministrados externamente).
 
-Cada capa de la red tiene su propia función objetivo que simplemente busca maximizar una medida de "bondad" para los datos positivos y minimizarla para los datos negativos. Esta aproximación tiene el potencial de ser más biológicamente plausible y de funcionar de manera eficiente en hardware analógico de bajo consumo. Además de crear una asimetría entre la magnitud de la salidas para un conjunto vs otro útil para aplicar otras técnicas de análisis de datos.
+Cada capa de la red tiene su propia función objetivo que simplemente busca maximizar una medida de "bondad" para los datos positivos y minimizarla para los datos negativos. Esta aproximación tiene el potencial de ser más biológicamente plausible y de funcionar de manera eficiente en hardware analógico de bajo consumo. Además de crear una asimetría entre la magnitud de las salidas para un conjunto vs otro útil para aplicar otras técnicas de análisis de datos.
 
 ### Makefile
 
 El `Makefile` facilita la compilación de los diferentes ejecutables (3):
 
 ```makefile
+# Makefile
+
 CXX = g++
 
 # Detectar automáticamente si se necesita -lstdc++fs basado en la versión de GCC
@@ -93,32 +104,32 @@ else
     FS_LIB = -lstdc++fs
 endif
 
-CXXFLAGS = $(STD) -Ofast -march=native -flto -fopenmp -ffast-math -funroll-loops -fno-math-errno `pkg-config --cflags opencv4`
+CXXFLAGS = $(STD) -Ofast -march=native -flto -fopenmp -ffast-math -funroll-loops -fno-math-errno `pkg-config --cflags opencv4` $(INCLUDE_DIR)
 LDFLAGS = -flto -fopenmp `pkg-config --libs opencv4` $(FS_LIB)
 
-# Definir los ejecutables
-TARGETS = ff debugtest justnoise
+# Directorio de headers
+INCLUDE_DIR = -I include -I /usr/include/eigen3
+
+# Ejecutables
+TARGETS = noise train
 
 all: $(TARGETS)
 
-# Regla para compilar 'ff'
-ff: forward_forward.cpp
-	$(CXX) $(CXXFLAGS) -o ff forward_forward.cpp $(LDFLAGS) -I /usr/include/eigen3
+# Regla para compilar 'noise'
+noise: src/image_utils.cpp src/main_noise.cpp
+	$(CXX) $(CXXFLAGS) -o noise src/image_utils.cpp src/main_noise.cpp $(LDFLAGS)
 
-# Regla para compilar 'debugtest'
-debugtest: debugtest.cpp
-	$(CXX) $(CXXFLAGS) -o debugtest debugtest.cpp $(LDFLAGS) -I /usr/include/eigen3
-
-# Regla para compilar 'justnoise'
-justnoise: justnoise.cpp
-	$(CXX) $(CXXFLAGS) -o justnoise justnoise.cpp $(LDFLAGS) -I /usr/include/eigen3
+# Regla para compilar 'train'
+train: src/neural_network.cpp src/optimizer.cpp src/main_train.cpp
+	$(CXX) $(CXXFLAGS) -o train src/neural_network.cpp src/optimizer.cpp src/main_train.cpp $(LDFLAGS)
 
 clean:
 	rm -f $(TARGETS)
 
 .PHONY: all clean
 ```
-Si ya tenemos los datos en las carpetas positivas y negativas podemos proceder directamente a ejecutar `./ff` para entrenar el modelo deseado, de otra forma podemos usar `justnoise` o `debugtest` para generar los datos positivos y/o negativos.
+
+Si ya tenemos los datos en las carpetas positivas y negativas podemos proceder directamente a ejecutar `./train` para entrenar el modelo deseado, de otra forma podemos usar `./noise` para generar los datos positivos y/o negativos.
 
 #### Explicación de Componentes Clave:
 
@@ -132,7 +143,7 @@ Si ya tenemos los datos en las carpetas positivas y negativas podemos proceder d
 
 - **Reglas de Compilación:**
   - `all`: Compila todos los ejecutables definidos en `TARGETS`.
-  - `ff`, `debugtest`, `justnoise`:  Las tres reglas sirven para construir los datos y entrenar la red.
+  - `ff`, `debugtest`, `justnoise`: Las tres reglas sirven para construir los datos y entrenar la red.
 
 - **Regla de Limpieza:**
   - `clean`: Elimina los ejecutables compilados.
@@ -142,7 +153,7 @@ Si ya tenemos los datos en las carpetas positivas y negativas podemos proceder d
 El proyecto contiene principalmente tres ejecutables:
 
 1. **`ff` (`forward_forward.cpp`):** Construye el ejecutable para entrenar, evaluar y visualizar una red.
-2. **`debugtest` (`debugtest.cpp`):** Usa Gaussian Splatting para producir un conjunto de datos complejo de juguete de imágenes de 64x64 pixeles de un color aleatorio con manchones de colores, también produce el conjunto negativo a partir del positivo, mezclando dos datos por canal con tres máscaras aleatorias.
+2. **`debugtest` (`debugtest.cpp`):** Usa Gaussian Splatting para producir un conjunto de datos complejo de juguete de imágenes de 64x64 píxeles de un color aleatorio con manchones de colores, también produce el conjunto negativo a partir del positivo, mezclando dos datos por canal con tres máscaras aleatorias.
 3. **`justnoise` (`justnoise.cpp`):** Únicamente produce el conjunto de datos negativo a partir de los contenidos de la carpeta de datos negativos.
 
 ## `forward_forward.cpp`
@@ -162,7 +173,7 @@ La clase `Dataset` se encarga de cargar imágenes desde un directorio, normaliza
    - **Es decir:** Cada píxel de la imagen, originalmente representado por un valor entero en el rango [0, 255], se escala al rango [0, 1] dividiendo por 255.
 
      $$
-     \text{pixel\_normalizado} = \frac{\text{pixel\_original}}{255.0}
+     \text{normalizado} = \frac{\text{original}}{255.0}
      $$
 
 2. **Aplanamiento de la Imagen:**
@@ -181,12 +192,6 @@ La clase `Dataset` se encarga de cargar imágenes desde un directorio, normaliza
    ```
 
    - **Es decir:** La imagen 2D con múltiples canales (por ejemplo, RGB) se convierte en un vector de una sola dimensión concatenando los valores de los píxeles.
-
-     $$
-     \text{sample} = [p_{1,1,c}, p_{1,2,c}, \dots, p_{m,n,c}]
-     $$
-
-     Donde $ p_{i,j,c} $ representa el valor del canal $ c $ en la posición $ (i, j) $ de la imagen.
 
 3. **Validación de Tamaños Consistentes:**
 
@@ -211,7 +216,7 @@ El optimizador es responsable de actualizar los pesos y sesgos de las capas de l
    v_weights = beta2 * v_weights + (1.0f - beta2) * gradients.array().square().matrix();
    Eigen::MatrixXf m_hat = m_weights.array() / (1.0f - std::pow(beta1, t_weights));
    Eigen::MatrixXf v_hat = v_weights.array() / (1.0f - std::pow(beta2, t_weights));
-   
+
    weights.array() -= lr * m_hat.array() / (v_hat.array().sqrt() + eps);
    ```
 
@@ -244,7 +249,14 @@ El optimizador es responsable de actualizar los pesos y sesgos de las capas de l
 
 2. **Actualización de Pesos y Sesgos:**
 
-   El optimizador utiliza las estimaciones $ \hat{m}_t $ y $ \hat{v}_t $ para actualizar los parámetros, asegurando que las actualizaciones sean adaptativas y eficientes.
+   El optimizador utiliza las estimaciones $ \hat{m}_t $ y $ \hat{v}_t $ para actualizar los pesos y sesgos mediante el optimizador seleccionado (por ejemplo, Adam).
+
+   ```cpp
+   optimizer->updateWeights(weights, grad_weights);
+   optimizer->updateBiases(biases, grad_biases);
+   ```
+
+   - **Es decir:** La actualización sigue las reglas definidas por el optimizador Adam, como se explicó anteriormente.
 
 ### Clase `FullyConnectedLayer`
 
@@ -340,7 +352,7 @@ El optimizador es responsable de actualizar los pesos y sesgos de las capas de l
      Se utiliza una función sigmoide para mapear la bondad a una probabilidad $ p $:
 
      $$
-     p = \sigma(goodness - \theta) = \frac{1}{1 + e^{-(G - \theta)}}
+     p = \sigma(\text{bondad} - \theta) = \frac{1}{1 + e^{-(G - \theta)}}
      $$
 
      Donde $ \theta $ es el umbral.
@@ -575,7 +587,7 @@ Esta función maneja el ciclo de entrenamiento del modelo, incluyendo la pasada 
        \text{correct\_negative} += \mathbb{I}(G(x) < \theta)
        $$
 
-     Donde $ \mathbb{I} $ es la función indicadora.
+       Donde $ \mathbb{I} $ es la función indicadora.
 
 3. **Cálculo de la Precisión:**
 

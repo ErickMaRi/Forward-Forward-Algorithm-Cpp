@@ -1,3 +1,5 @@
+# Makefile
+
 CXX = g++
 
 # Detectar automáticamente si se necesita -lstdc++fs basado en la versión de GCC
@@ -10,25 +12,24 @@ else
     FS_LIB = -lstdc++fs
 endif
 
-CXXFLAGS = $(STD) -Ofast -march=native -flto -fopenmp -ffast-math -funroll-loops -fno-math-errno `pkg-config --cflags opencv4`
+CXXFLAGS = $(STD) -Ofast -march=native -flto -fopenmp -ffast-math -funroll-loops -fno-math-errno `pkg-config --cflags opencv4` $(INCLUDE_DIR)
 LDFLAGS = -flto -fopenmp `pkg-config --libs opencv4` $(FS_LIB)
 
-# Definir los ejecutables
-TARGETS = ff debugtest justnoise
+# Directorio de headers
+INCLUDE_DIR = -I include -I /usr/include/eigen3
+
+# Ejecutables
+TARGETS = noise train
 
 all: $(TARGETS)
 
-# Regla para compilar 'ff'
-ff: forward_forward.cpp
-	$(CXX) $(CXXFLAGS) -o ff forward_forward.cpp $(LDFLAGS) -I /usr/include/eigen3
+# Regla para compilar 'noise'
+noise: src/image_utils.cpp src/main_noise.cpp
+	$(CXX) $(CXXFLAGS) -o noise src/image_utils.cpp src/main_noise.cpp $(LDFLAGS)
 
-# Regla para compilar 'debugtest'
-debugtest: debugtest.cpp
-	$(CXX) $(CXXFLAGS) -o debugtest debugtest.cpp $(LDFLAGS) -I /usr/include/eigen3
-
-# Regla para compilar 'justnoise'
-justnoise: justnoise.cpp
-	$(CXX) $(CXXFLAGS) -o justnoise justnoise.cpp $(LDFLAGS) -I /usr/include/eigen3
+# Regla para compilar 'train'
+train: src/neural_network.cpp src/optimizer.cpp src/main_train.cpp
+	$(CXX) $(CXXFLAGS) -o train src/neural_network.cpp src/optimizer.cpp src/main_train.cpp $(LDFLAGS)
 
 clean:
 	rm -f $(TARGETS)

@@ -1,20 +1,60 @@
+// src/image_utils.cpp
+
+#include "image_utils.hpp"
 #include "FastNoiseLite.h"
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <random>
-#include <string>
 #include <filesystem>
 
 namespace fs = std::filesystem;
 
-/**
- * @brief Genera imágenes negativas mezclando dos imágenes positivas utilizando máscaras de ruido simplex independientes para cada canal.
- * @param positive_directory Directorio que contiene las imágenes positivas.
- * @param negative_directory Directorio donde se guardarán las imágenes negativas.
- * @param num_images Número de imágenes negativas a generar.
- * @param min_frequency Frecuencia mínima para el ruido.
- * @param max_frequency Frecuencia máxima para el ruido.
- */
+void generatePositiveImages(const std::string& directory, int num_images, cv::Size image_size) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis_x(0, image_size.width - 1);
+    std::uniform_int_distribution<> dis_y(0, image_size.height - 1);
+    std::uniform_real_distribution<float> color_dis(0.0f, 1.0f); // Distribución para colores
+
+    // Crear el directorio si no existe
+    fs::create_directories(directory);
+
+    for (int i = 0; i < num_images; ++i) {
+        // Generar un color de fondo aleatorio
+        cv::Scalar background_color(color_dis(gen), color_dis(gen), color_dis(gen));
+        cv::Mat image(image_size, CV_32FC3, background_color);
+
+        int num_gaussians = 5; // Número de puntos gaussianos por imagen
+        for (int j = 0; j < num_gaussians; ++j) {
+            int x = dis_x(gen);
+            int y = dis_y(gen);
+
+            cv::Point center(x, y);
+            cv::Scalar color(color_dis(gen), color_dis(gen), color_dis(gen)); // Colores aleatorios entre 0 y 1
+
+            // Dibujar una gaussiana en la imagen
+            cv::circle(image, center, 10, color, -1, cv::LINE_AA);
+        }
+
+        // Aplicar GaussianBlur una sola vez después de dibujar todas las gaussianas
+        cv::GaussianBlur(image, image, cv::Size(0, 0), 5);
+
+        // Escalar a [0,255] y convertir a 8 bits para guardar
+        cv::Mat image_8u;
+        image.convertTo(image_8u, CV_8UC3, 255.0);
+
+        std::string filename = directory + "/positive_" + std::to_string(i) + ".png";
+        cv::imwrite(filename, image_8u);
+
+        // Mostrar la imagen generada (opcional)
+        if (i < 2) { // Mostrar las dos primeras imágenes
+            cv::imshow("Positive Image " + std::to_string(i), image_8u);
+            cv::waitKey(0);
+            cv::destroyAllWindows();
+        }
+    }
+}
+
 void generateNegativeImages(const std::string& positive_directory, 
                             const std::string& negative_directory, 
                             int num_images, 
@@ -129,24 +169,5 @@ void generateNegativeImages(const std::string& positive_directory,
             cv::waitKey(0);
             cv::destroyAllWindows();
         }
-    }
-}
-
-int main() {
-    try {
-        std::string positive_directory = "positive_images";
-        std::string negative_directory = "negative_images";
-        int num_negative_images = 10000; // Número de imágenes negativas a generar
-        float min_frequency = 0.002f;      // Frecuencia mínima para el ruido Simplex
-        float max_frequency = 0.1f;       // Frecuencia máxima para el ruido Simplex
-
-        // Generar imágenes negativas
-        generateNegativeImages(positive_directory, negative_directory, num_negative_images, min_frequency, max_frequency);
-        std::cout << "Imágenes negativas generadas correctamente.\n";
-
-        return 0;
-    } catch (const std::exception& ex) {
-        std::cerr << "Error: " << ex.what() << "\n";
-        return -1;
     }
 }
