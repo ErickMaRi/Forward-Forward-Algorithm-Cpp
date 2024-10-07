@@ -1,5 +1,7 @@
 # Forward-Forward en C++
 
+#### El markdown no muestra correctamente las fórmulas en Github, yo uso el Markdown Editor de zaaack en VSCodium.
+
 Este documento explica la implementación del **Algoritmo Forward-Forward** introducido por Geoffrey Hinton aquí presente. El objetivo es ofrecer una comprensión matemática y conceptual completa de cada componente del código, facilitando así su estudio y aplicación.
 
 ## Árbol de carpetas y archivos sin los datos
@@ -128,8 +130,7 @@ clean:
 
 .PHONY: all clean
 ```
-
-Si ya tenemos los datos en las carpetas positivas y negativas podemos proceder directamente a ejecutar `./train` para entrenar el modelo deseado, de otra forma podemos usar `./noise` para generar los datos positivos y/o negativos.
+Si ya tenemos los datos en las carpetas positivas y negativas podemos proceder directamente a ejecutar `./ff` para entrenar el modelo deseado, de otra forma podemos usar `justnoise` o `debugtest` para generar los datos positivos y/o negativos.
 
 #### Explicación de Componentes Clave:
 
