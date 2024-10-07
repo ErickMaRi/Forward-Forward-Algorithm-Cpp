@@ -1,3 +1,5 @@
-/ffolder/Imagenet64_train_part1/train_data_batch_1
-/data/positive_images/*.png
-/data/negative_images/*.png
+/ffolder/Imagenet64_train_part1/
+/ffolder/data/positive_images/*.png
+/ffolder/data/negative_images/*.png
+/ffolder/histograms/*.png
+/ffolder/*.bin
