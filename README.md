@@ -130,7 +130,7 @@ clean:
 
 .PHONY: all clean
 ```
-Si ya tenemos los datos en las carpetas positivas y negativas podemos proceder directamente a ejecutar `./ff` para entrenar el modelo deseado, de otra forma podemos usar `justnoise` o `debugtest` para generar los datos positivos y/o negativos.
+Si ya tenemos los datos en las carpetas positivas y negativas podemos proceder directamente a ejecutar `./train` para entrenar el modelo deseado, de otra forma podemos usar `./noise positive` o `./noise negative` para generar los datos positivos o negativos.
 
 #### Explicación de Componentes Clave:
 
@@ -144,20 +144,19 @@ Si ya tenemos los datos en las carpetas positivas y negativas podemos proceder d
 
 - **Reglas de Compilación:**
   - `all`: Compila todos los ejecutables definidos en `TARGETS`.
-  - `ff`, `debugtest`, `justnoise`: Las tres reglas sirven para construir los datos y entrenar la red.
+  - `train`, `noise`: Las dos reglas sirven para construir los datos y entrenar la red.
 
 - **Regla de Limpieza:**
   - `clean`: Elimina los ejecutables compilados.
 
 ### Archivos Principales
 
-El proyecto contiene principalmente tres ejecutables:
+El proyecto contiene principalmente dos ejecutables:
 
-1. **`ff` (`forward_forward.cpp`):** Construye el ejecutable para entrenar, evaluar y visualizar una red.
-2. **`debugtest` (`debugtest.cpp`):** Usa Gaussian Splatting para producir un conjunto de datos complejo de juguete de imágenes de 64x64 píxeles de un color aleatorio con manchones de colores, también produce el conjunto negativo a partir del positivo, mezclando dos datos por canal con tres máscaras aleatorias.
-3. **`justnoise` (`justnoise.cpp`):** Únicamente produce el conjunto de datos negativo a partir de los contenidos de la carpeta de datos negativos.
+1. **`train` (`main_train.cpp`):** Construye el ejecutable para entrenar, evaluar y visualizar una red.
+2. **`noise` (`main_noise.cpp`):** Usa Gaussian Splatting para producir un conjunto de datos complejo de juguete de imágenes de 64x64 píxeles de un color aleatorio con manchones de colores, también produce el conjunto negativo a partir del positivo, mezclando dos datos por canal con tres máscaras aleatorias. Produce ambos por defecto pero puede producir uno u otro con el argumento `positive` o `negative`.
 
-## `forward_forward.cpp`
+## Implementación
 
 ### Clase `Dataset`
 
