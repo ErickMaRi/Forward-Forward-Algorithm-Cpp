@@ -57,7 +57,7 @@ F-F_Cpp/ffolder$ tree
 1. [Algoritmo Forward-Forward](#algoritmo-forward-forward)
    - [Makefile](#makefile)
    - [Archivos Principales](#archivos-principales)
-2. [Detalles del Código](#detalles-del-código)
+2. [Implementación](#detalles-del-código)
    - [Bibliotecas y Dependencias](#bibliotecas-y-dependencias)
    - [Clase `Dataset`](#clase-dataset)
    - [Clase `Optimizer`](#clase-optimizer)
