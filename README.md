@@ -850,8 +850,8 @@ Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos h
    Biblioteca de generación de ruido rápida y eficiente utilizada para crear máscaras y datos sintéticos en la generación de conjuntos de datos.
 
 4. **Forward-Forward Algorithm:**  
-   Hinton, G. (2022). *The Forward-Forward Algorithm: Some Preliminary Investigations*. Disponible en: [https://www.cs.toronto.edu/~hinton/FF.pdf](https://www.cs.toronto.edu/~hinton/FF.pdf)  
-   Documento que introduce el algoritmo Forward-Forward como una alternativa al backpropagation tradicional para el entrenamiento de redes neuronales.
+   Hinton, G. (2022). *The Forward-Forward Algorithm: Some Preliminary Investigations*. Disponible en [ArXiv](https://arxiv.org/abs/2212.13345)  
+   Introduce el algoritmo Forward-Forward como una alternativa al backpropagation tradicional para el entrenamiento de redes neuronales, capa a capa, de forma autosupervisada.
 
 5. **C++ Standard Library:**  
    Documentación oficial de la [Standard Template Library (STL)](https://en.cppreference.com/w/cpp) utilizada para estructuras de datos, algoritmos y utilidades fundamentales en C++.
