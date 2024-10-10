@@ -518,10 +518,10 @@ void trainAndEvaluate(Dataset& train_positive_samples,
         double accuracy = (static_cast<double>(correct_positive + correct_negative) /
                           (val_positive_size + val_negative_size)) * 100.0;
 	
-	double accuracyn = (static_cast<double>(correct_negative) /
+	    double accuracyn = (static_cast<double>(correct_negative) /
                           (val_negative_size)) * 100.0;
 
-	double accuracyp = (static_cast<double>(correct_positive) /
+	    double accuracyp = (static_cast<double>(correct_positive) /
                           (val_positive_size)) * 100.0;
 
         if (verbose) {
@@ -563,8 +563,14 @@ void trainAndEvaluate(Dataset& train_positive_samples,
             }
         }
 
-        // Construir el nombre de archivo único para la época actual
-        std::string hist_filename = "histograms/Histograma_Combined_epoch_" + std::to_string(epoch + 1) + ".png";
+        // Declare hist_filename before the if-else block
+        std::string hist_filename;
+
+        if (epoch < 9) {
+            hist_filename = "histograms/Histograma_Combined_epoch_0" + std::to_string(epoch + 1) + ".png";
+        } else {
+            hist_filename = "histograms/Histograma_Combined_epoch_" + std::to_string(epoch + 1) + ".png";
+        }
 
         // Guardar los histogramas combinados de esta época con el nombre único
         plotGoodnessHistogramsCombined(goodness_positive_vals,
