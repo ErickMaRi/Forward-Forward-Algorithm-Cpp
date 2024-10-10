@@ -22,11 +22,19 @@ void generatePositiveImages(const std::string& directory, int num_images, cv::Si
  * @param num_images Número de imágenes negativas a generar.
  * @param min_frequency Frecuencia mínima para el ruido.
  * @param max_frequency Frecuencia máxima para el ruido.
+ * @param bias_type Define el cezgo introducido al conjunto de datos negativo
+ * @param line_thickness Grosor de la línea
+ * @param fixed_color Color fijo
+ * @param fixed_position Posición fija de la línea
  */
 void generateNegativeImages(const std::string& positive_directory, 
                             const std::string& negative_directory, 
                             int num_images, 
                             float min_frequency, 
-                            float max_frequency);
+                            float max_frequency, 
+                            const std::string& bias_type = "none",
+                            int line_thickness = 2,
+                            const cv::Scalar& fixed_color = cv::Scalar(0, 0, 255), 
+                            const cv::Point& fixed_position = cv::Point(32, 32));
 
 #endif // IMAGE_UTILS_HPP

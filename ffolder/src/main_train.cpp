@@ -68,15 +68,27 @@ std::shared_ptr<Optimizer> selectOptimizer() {
     std::cin >> optimizer_choice;
 
     if (optimizer_choice == 1) {
-        float learning_rate;
+        float learning_rate, beta1, beta2, epsilon;
+
         std::cout << "Ingrese el learning rate para Adam Optimizer: ";
         std::cin >> learning_rate;
-        return std::make_shared<AdamOptimizer>(learning_rate);
+
+        std::cout << "Ingrese el valor de beta1 (ej. 0.9): ";
+        std::cin >> beta1;
+
+        std::cout << "Ingrese el valor de beta2 (ej. 0.999): ";
+        std::cin >> beta2;
+
+        std::cout << "Ingrese el valor de epsilon (ej. 1e-8): ";
+        std::cin >> epsilon;
+
+        return std::make_shared<AdamOptimizer>(learning_rate, beta1, beta2, epsilon);
     } else {
-        std::cout << "Opción inválida. Usando Adam Optimizer con learning rate por defecto.\n";
+        std::cout << "Opción inválida. Usando Adam Optimizer con valores por defecto.\n";
         return std::make_shared<AdamOptimizer>();
     }
 }
+
 
 // ================================
 // Funciones para Visualización
@@ -505,9 +517,15 @@ void trainAndEvaluate(Dataset& train_positive_samples,
         // Calcula la precisión
         double accuracy = (static_cast<double>(correct_positive + correct_negative) /
                           (val_positive_size + val_negative_size)) * 100.0;
+	
+	double accuracyn = (static_cast<double>(correct_negative) /
+                          (val_negative_size)) * 100.0;
+
+	double accuracyp = (static_cast<double>(correct_positive) /
+                          (val_positive_size)) * 100.0;
 
         if (verbose) {
-            std::cout << "Precisión en validación: " << accuracy << "%\n";
+            std::cout << "Precisión en validación: " << accuracy << "%\n" << "En los positivos: " << accuracyp << "%\n" <<"En los negativos: " << accuracyn << "%\n";
         }
 
         // Verifica si esta es la mejor precisión hasta ahora
