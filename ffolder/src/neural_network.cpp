@@ -140,6 +140,7 @@ FullyConnectedLayer::FullyConnectedLayer(size_t input_size, size_t output_size,
       pre_activations(output_size) {
     std::random_device rd;
     std::mt19937 gen(rd());
+    // Se inicializa con una distribución de He 
     float std_dev = std::sqrt(2.0f / input_size);
     std::normal_distribution<float> weight_dist(0.0f, std_dev);
 

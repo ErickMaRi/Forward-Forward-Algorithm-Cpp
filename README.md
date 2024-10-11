@@ -868,3 +868,7 @@ Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos h
 
 8. **C++ Compiler (GCC):**  
    GNU Compiler Collection, utilizado para compilar el código con optimizaciones de rendimiento y soporte para C++17.
+
+## TODO
+
+1. Mezclar los datos positivos y negativos en un solo batch para estabilizar el aprendizaje.
