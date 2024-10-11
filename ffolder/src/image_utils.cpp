@@ -163,6 +163,11 @@ void generateNegativeImages(const std::string& positive_directory,
                 end = cv::Point(fixed_position.x + 20, fixed_position.y);
                 color = fixed_color;
             }
+            else if (bias_type == "random_color_fixed_position") {
+                start = fixed_position;
+                end = cv::Point(fixed_position.x + 20, fixed_position.y);
+                color = cv::Scalar(color_dis(gen) * 255, color_dis(gen) * 255, color_dis(gen) * 255);
+            }
 
             cv::line(neg_image_8u, start, end, color, line_thickness, cv::LINE_AA);
         }
