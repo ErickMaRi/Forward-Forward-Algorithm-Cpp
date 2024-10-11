@@ -2,6 +2,8 @@
 
 #### El markdown no muestra correctamente las fórmulas en Github, yo uso el Markdown Editor de zaaack en VSCodium.
 
+![Progreso entrenamiento](figs/histograma.gif)
+
 Este documento explica la implementación del **Algoritmo Forward-Forward** introducido por Geoffrey Hinton aquí presente. El objetivo es ofrecer una comprensión matemática y conceptual completa de cada componente del código, facilitando así su estudio y aplicación.
 
 ## Árbol de carpetas y archivos sin los datos
@@ -155,6 +157,8 @@ El proyecto contiene principalmente dos ejecutables:
 
 1. **`train` (`main_train.cpp`):** Construye el ejecutable para entrenar, evaluar y visualizar una red.
 2. **`noise` (`main_noise.cpp`):** Usa Gaussian Splatting para producir un conjunto de datos complejo de juguete de imágenes de 64x64 píxeles de un color aleatorio con manchones de colores, también produce el conjunto negativo a partir del positivo, mezclando dos datos por canal con tres máscaras aleatorias. Produce ambos por defecto pero puede producir uno u otro con el argumento `positive` o `negative`.
+
+![PCA](figs/crab.png)
 
 ## Implementación
 
