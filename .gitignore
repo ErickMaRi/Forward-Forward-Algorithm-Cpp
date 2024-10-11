@@ -2,4 +2,7 @@
 /ffolder/data/positive_images/*.png
 /ffolder/data/negative_images/*.png
 /ffolder/histograms/*.png
+/ffolder/histograms/*.gif
 /ffolder/*.bin
+/ffolder/noise
+/ffolder/train
