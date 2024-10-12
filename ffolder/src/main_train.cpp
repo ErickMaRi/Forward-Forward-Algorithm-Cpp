@@ -1021,7 +1021,7 @@ void trainModel() {
             best_overall_threshold = threshold;
         } else if (max_accuracy == accuracy_ensemble_vote) {
             std::cout << "\nEl ensemble mediante votación tiene la mejor precisión.\n";
-            // No podemos entrenar directamente un ensemble, así que usaremos el modelo promedio
+            // No podemos entrenar directamente un ensemble, así que usaremos el modelo promedio // TODO
             layer = averaged_model;
             best_overall_threshold = threshold;
         } else {

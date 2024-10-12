@@ -872,3 +872,5 @@ Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos h
 ## TODO
 
 1. Implementar cargado de modelos para resumir el entrenamiento de un modelo memorablemente bueno con el mismo conjunto de datos, o usar otro conjunto similar.
+
+2. Implementar el aprendizaje para el ensamble, por ahora continúa aprendiendo con el promedio de los ntop modelos.
