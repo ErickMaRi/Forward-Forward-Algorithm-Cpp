@@ -164,7 +164,7 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
     cv::reduce(projected_data, max_vals, 0, cv::REDUCE_MAX);
 
     // Crear imagen para el scatter plot
-    int img_size = 800;
+    int img_size = 600;
     cv::Mat scatter_image(img_size, img_size, CV_8UC3,
                           cv::Scalar(255, 255, 255));
 
