@@ -9,43 +9,47 @@ Este documento explica la implementación del **Algoritmo Forward-Forward** intr
 ## Árbol de carpetas y archivos sin los datos
 
 ```
-F-F_Cpp/ffolder$ tree
+F-F_Cpp/ffolder$ tree -I '*.png'
 .
-├── data
-│   ├── negative_images
-│   └── positive_images
-├── gifs
-│   ├── 3neur2reset.gif
-│   ├── 3neurnoresetdyn.gif
-│   ├── 3neurnoreset.gif
-│   ├── 512.gif
-│   ├── outputsingleneur2reset.gif
-│   ├── outputsingleneuronnoreset.gif
-│   └── singlenoresetdyn.gif
-├── groovy.bin
-├── histograms
-│   └── hacer gif con los png de la carpeta.txt
-├── Imagenet64_train_part1
-│   ├── extraer datos.py
-│   └── train_data_batch_1
-├── include
-│   ├── FastNoiseLite.h
-│   ├── image_utils.hpp
-│   ├── neural_network.hpp
-│   ├── optimizer.hpp
-│   └── scatter_plot_data.hpp
-├── Makefile
-├── noise
-├── pin.bin
-├── src
-│   ├── image_utils.cpp
-│   ├── main_noise.cpp
-│   ├── main_train.cpp
-│   ├── neural_network.cpp
-│   └── optimizer.cpp
-└── train
+├── ffolder
+│   ├── data
+│   │   ├── negative_images
+│   │   └── positive_images
+│   ├── gifs
+│   │   ├── 3neur2reset.gif
+│   │   ├── 3neurnoresetdyn.gif
+│   │   ├── 3neurnoreset.gif
+│   │   ├── 512.gif
+│   │   ├── outputsingleneur2reset.gif
+│   │   ├── outputsingleneuronnoreset.gif
+│   │   └── singlenoresetdyn.gif
+│   ├── histograms
+│   │   └── hacer gif con los png de la carpeta.txt
+│   ├── Imagenet64_train_part1
+│   │   ├── extraer datos.py
+│   │   ├── output_images
+│   │   └── train_data_batch_1
+│   ├── include
+│   │   ├── FastNoiseLite.h
+│   │   ├── image_utils.hpp
+│   │   ├── neural_network.hpp
+│   │   ├── optimizer.hpp
+│   │   └── scatter_plot_data.hpp
+│   ├── Makefile
+│   ├── noise
+│   ├── ntop_cache
+│   ├── src
+│   │   ├── image_utils.cpp
+│   │   ├── main_noise.cpp
+│   │   ├── main_train.cpp
+│   │   ├── neural_network.cpp
+│   │   └── optimizer.cpp
+│   └── train
+├── figs
+│   └── histograma.gif
+└── README.md
 
-8 directories, 25 files
+12 directories, 25 files
 ```
 
 1. `gifs` contiene algunos resultados para redes pequeñas.
@@ -53,41 +57,36 @@ F-F_Cpp/ffolder$ tree
 3. `Imagenet64_train_part1` contiene un segmento de los conjuntos de datos para imagenet de 64 píxeles.
 4. `negative_images` contiene los PNGs de 64x64 píxeles a color del conjunto de datos sintetizado.
 5. `positive_images` contiene los PNGs de 64x64 píxeles a color del conjunto de datos a estudiar.
-
+5. `ntop_cache` contiene los BINs que representan los mejores modelos del proceso de inicializacion, contiene el ensamble.
 ## Tabla de Contenidos
 
 1. [Algoritmo Forward-Forward](#algoritmo-forward-forward)
    - [Makefile](#makefile)
    - [Archivos Principales](#archivos-principales)
-2. [Implementación](#detalles-del-código)
-   - [Bibliotecas y Dependencias](#bibliotecas-y-dependencias)
+2. [Implementación](#implementación)
    - [Clase `Dataset`](#clase-dataset)
-   - [Clase `Optimizer`](#clase-optimizer)
-     - [Clase `AdamOptimizer`](#clase-adamoptimizer)
+   - [Clase `Optimizer` y `AdamOptimizer`](#clase-optimizer-y-adamoptimizer)
    - [Clase `FullyConnectedLayer`](#clase-fullyconnectedlayer)
    - [Funciones Auxiliares](#funciones-auxiliares)
-     - [División del Conjunto de Datos](#división-del-conjunto-de-datos)
-     - [Selección del Optimizador](#selección-del-optimizador)
+     - [División del Conjunto de Datos (`splitDataset`)](#división-del-conjunto-de-datos-splitdataset)
+     - [Selección del Optimizador (`selectOptimizer`)](#selección-del-optimizador-selectoptimizer)
    - [Funciones de Visualización](#funciones-de-visualización)
-     - [Visualización PCA](#visualización-pca)
-     - [Histogramas de Bondad](#histogramas-de-bondad)
-   - [Funciones de Entrenamiento y Evaluación](#funciones-de-entrenamiento-y-evaluación)
-   - [Función Principal (`main`)](#función-principal-main)
-3. [Explicación Matemática y Conceptual](#explicación-matemática-y-conceptual)
-   - [Conceptos Básicos de Redes Neuronales](#conceptos-básicos-de-redes-neuronales)
-   - [Forward-Forward vs Backpropagation](#forward-forward-vs-backpropagation)
-   - [Funciones de Activación y Derivadas](#funciones-de-activación-y-derivadas)
-   - [Optimización con Adam](#optimización-con-adam)
-   - [Métricas de Evaluación](#métricas-de-evaluación)
-4. [Referencias](#referencias)
+     - [Visualización PCA (`visualizePCA`)](#visualización-pca-visualizepca)
+     - [Histograma Combinado de Bondades (`plotGoodnessHistogramsCombined`)](#histograma-combinado-de-bondades-plotgoodnesshistogramscombined)
+   - [Funciones de Entrenamiento y Evaluación (`trainAndEvaluate`)](#funciones-de-entrenamiento-y-evaluación-trainandevaluate)
+   - [Función Principal (`trainModel`)](#función-principal-trainmodel)
+3. [Referencias](#referencias)
+4. [TODO](#todo)
 
 ---
 
 ## Algoritmo Forward-Forward
 
-El **Algoritmo Forward-Forward** es una alternativa al método de **backpropagation** tradicionalmente utilizado para entrenar redes neuronales profundas. Introducido por Geoffrey Hinton, este algoritmo reemplaza las pasadas hacia adelante y hacia atrás de backpropagation por dos pasadas hacia adelante: una con datos positivos (reales) y otra con datos negativos (generados por la red misma o suministrados externamente).
+El **Algoritmo Forward-Forward** es una alternativa al método de **propagación hacia atrás** tradicionalmente utilizado para entrenar redes neuronales profundas. Introducido por Geoffrey Hinton, este algoritmo reemplaza las pasadas hacia adelante y hacia atrás de backpropagation por dos pasadas hacia adelante: una con datos positivos (reales) y otra con datos negativos (generados por la red misma o suministrados externamente).
 
-Cada capa de la red tiene su propia función objetivo que simplemente busca maximizar una medida de "bondad" para los datos positivos y minimizarla para los datos negativos. Esta aproximación tiene el potencial de ser más biológicamente plausible y de funcionar de manera eficiente en hardware analógico de bajo consumo. Además de crear una asimetría entre la magnitud de las salidas para un conjunto vs otro útil para aplicar otras técnicas de análisis de datos.
+Cada capa de la red tiene su propia función objetivo que simplemente busca maximizar una medida de "bondad" para los datos positivos y minimizarla para los datos negativos. Esta aproximación tiene el potencial de ser más biológicamente plausible y de funcionar de manera eficiente en hardware analógico de bajo consumo. Además de crear una asimetría entre la magnitud de las salidas para un conjunto vs otro, útil para aplicar otras técnicas de análisis de datos.
+
+Por ahora todo lo estamos haciendo con una sola capa, pero implementar una red no es mucho más complicado que hacer el controlador que se dedica a decidir cuando las capas aprenden y cuando solo infieren (recuerde que la función para el forward es la que acciona que los pesos se actualizan si `learn = True`), he experimentado con poner todas las capas a aprender a la vez, pero resulta muy inestable. Además es necesario normalizar los vectores escondidos entre las capas, para que estas no aprendan a distinguir los dos conjuntos de datos a partir de las magnitudes, forzándolas a aprender a distinguir los conjuntos a partir de las relaciones entre las activaciones. Finalmente para clasificar Hinton recomienda añadir una capa lineal, o concatenar las activaciones de varias capas y usar esto como la entrada para una capa lineal. Sorprendentemente usar PCA con una sola capa representa los dos conjuntos de datos de forma desconectada si el problema es suficientemente fácil (o si concatenamos los labels con los datos de entrada, efectivamente realizando aprendizaje supervisado).
 
 ### Makefile
 
@@ -132,7 +131,7 @@ clean:
 
 .PHONY: all clean
 ```
-Si ya tenemos los datos en las carpetas positivas y negativas podemos proceder directamente a ejecutar `./train` para entrenar el modelo deseado, de otra forma podemos usar `./noise positive` o `./noise negative` para generar los datos positivos o negativos.
+Si ya tenemos los datos en las carpetas positivas y negativas podemos proceder directamente a ejecutar `./train` para entrenar el modelo deseado, de otra forma podemos usar `./noise positive` o `./noise negative` para generar los datos positivos o negativos. Podemos llamar a `./noise` con más argumentos para introducir cezgos que faciliten la distinción de la salida del modelo entre los dos conjuntos, consultar `image_utils.cpp` para más información.
 
 #### Explicación de Componentes Clave:
 
@@ -157,8 +156,6 @@ El proyecto contiene principalmente dos ejecutables:
 
 1. **`train` (`main_train.cpp`):** Construye el ejecutable para entrenar, evaluar y visualizar una red.
 2. **`noise` (`main_noise.cpp`):** Usa Gaussian Splatting para producir un conjunto de datos complejo de juguete de imágenes de 64x64 píxeles de un color aleatorio con manchones de colores, también produce el conjunto negativo a partir del positivo, mezclando dos datos por canal con tres máscaras aleatorias. Produce ambos por defecto pero puede producir uno u otro con el argumento `positive` o `negative`.
-
-![PCA](figs/crab.png)
 
 ## Implementación
 
@@ -195,7 +192,7 @@ La clase `Dataset` se encarga de cargar imágenes desde un directorio, normaliza
    }
    ```
 
-   - **Es decir:** La imagen 2D con múltiples canales (por ejemplo, RGB) se convierte en un vector de una sola dimensión concatenando los valores de los píxeles.
+   - **Es decir:** La imagen 2D con múltiples canales (por ejemplo, RGB) se convierte en un vector de una sola dimensión concatenando los valores de los píxeles. Con datos de 64x64 pixeles a color y con solo tres neuronas por capa tenemos ya `64*64*3*3 + 3= 36867` parámetros.
 
 3. **Validación de Tamaños Consistentes:**
 
@@ -275,7 +272,7 @@ El optimizador es responsable de actualizar los pesos y sesgos de las capas de l
    biases = Eigen::VectorXf::Constant(output_size, 0.01f); // Inicializa sesgos pequeños
    ```
 
-   - **Es decir:** Los pesos se inicializan con una distribución normal centrada en 0 con una desviación estándar de $ \sqrt{\frac{2}{n_{\text{entrada}}}} $, donde $ n_{\text{entrada}} $ es el número de entradas a la capa. Esta inicialización, conocida como **Inicialización de He**, ayuda a mantener la varianza de las activaciones a través de las capas, facilitando el entrenamiento de redes profundas. No se ha experimentado si debemos buscar distribuciones probabilísticas específicas para la inicialización de redes F-F, pues aprenden capa a capa.
+   - **Es decir:** Los pesos se inicializan con una distribución normal centrada en 0 con una desviación estándar de $ \sqrt{\frac{2}{n_{\text{entrada}}}} $, donde $ n_{\text{entrada}} $ es el número de entradas a la capa. Esta inicialización, conocida como **Inicialización de He**, ayuda a mantener la varianza de las activaciones a través de las capas, facilitando el entrenamiento de redes profundas. No se ha experimentado si debemos buscar distribuciones probabilísticas específicas para la inicialización de redes F-F, pues aprenden capa a capa, pero se eligió He por la función de activación leaky ReLu que se usó.
 
      $$
      W_{ij} \sim \mathcal{N}\left(0, \sqrt{\frac{2}{n_{\text{entrada}}}}\right)
@@ -316,7 +313,7 @@ El optimizador es responsable de actualizar los pesos y sesgos de las capas de l
      \mathbf{a} = \sigma(\mathbf{z})
      $$
 
-     Donde $ \sigma $ es la función de activación (por ejemplo, Leaky ReLU):
+     Donde $ \sigma $ es la función de activación (en nuestro caso, Leaky ReLU):
 
      $$
      \sigma(z_i) = \begin{cases}
@@ -339,7 +336,8 @@ El optimizador es responsable de actualizar los pesos y sesgos de las capas de l
      \text{bondad} = \| \mathbf{a} \|^2 = \sum_{i=1}^{m} a_i^2
      $$
 
-     Donde $ m $ es el número de neuronas en la capa.
+     Donde $ m $ es el número de neuronas en la capa. Elegido por Geofree Hinton gracias a que tiene una derivada simple, multiplicar por dos en algunos contextos hasta es un simple bit shift.
+   
 
 #### Cálculo de la Pérdida y Gradientes
 
@@ -452,6 +450,8 @@ Permite al usuario seleccionar el optimizador a utilizar durante el entrenamient
 
 ### Funciones de Visualización
 
+![PCA](figs/crab.png)
+
 #### Visualización PCA (`visualizePCA`)
 
 Realiza un Análisis de Componentes Principales (PCA) sobre las activaciones de una capa de la red para reducir la dimensionalidad y visualizar los datos en 2D o 3D.
@@ -499,230 +499,240 @@ Realiza un Análisis de Componentes Principales (PCA) sobre las activaciones de 
 
 ### Funciones de Entrenamiento y Evaluación (`trainAndEvaluate`)
 
-Esta función maneja el ciclo de entrenamiento del modelo, incluyendo la pasada hacia adelante, actualización de pesos, evaluación en el conjunto de validación y ajuste dinámico del umbral si está habilitado.
+Esta función maneja el ciclo de entrenamiento del modelo, incluyendo la pasada hacia adelante, actualización de pesos, evaluación en el conjunto de validación y ajuste dinámico del umbral si está habilitado. Por ahora es código muerto comentado en `main_train.cpp` y sirve para crear el método que controla el aprendizaje de varias capas intercaladas con la normalización de los vectores escondidos.
 
-1. **Ciclo de Entrenamiento por Época:**
+**Parámetros de la Función:**
+
+- `Dataset& train_positive_samples`: Conjunto de datos de entrenamiento de muestras positivas.
+- `Dataset& train_negative_samples`: Conjunto de datos de entrenamiento de muestras negativas.
+- `Dataset& val_positive_samples`: Conjunto de datos de validación de muestras positivas.
+- `Dataset& val_negative_samples`: Conjunto de datos de validación de muestras negativas.
+- `FullyConnectedLayer& layer`: La capa de red neuronal que se está entrenando.
+- `float& threshold`: El umbral para determinar la bondad.
+- `size_t epochs`: Número de épocas de entrenamiento.
+- `const std::function<float(float)>& activation`: Función de activación.
+- `const std::function<float(float)>& activation_derivative`: Derivada de la función de activación.
+- `bool verbose`: Si se debe imprimir información detallada durante el entrenamiento.
+- `double& best_score`: La mejor precisión obtenida hasta ahora.
+- `bool dynamic_threshold`: Si se debe ajustar el umbral dinámicamente.
+- `std::vector<float>& goodness_positive_vals`: Vector para almacenar las bondades de las muestras positivas.
+- `std::vector<float>& goodness_negative_vals`: Vector para almacenar las bondades de las muestras negativas.
+- `size_t patience`: Número de épocas para esperar antes de revertir al mejor modelo si no hay mejora.
+- `FullyConnectedLayer& best_layer`: Capa para almacenar el mejor modelo encontrado hasta ahora.
+- `float& best_threshold`: Mejor umbral encontrado hasta ahora.
+
+**Descripción Detallada:**
+
+1. **Inicialización:**
+
+   Se inicializan variables para rastrear el número de muestras y controlar el criterio de parada temprana (early stopping) basado en paciencia.
+
+   ```cpp
+   size_t train_positive_size = train_positive_samples.getNumSamples();
+   size_t train_negative_size = train_negative_samples.getNumSamples();
+   size_t val_positive_size = val_positive_samples.getNumSamples();
+   size_t val_negative_size = val_negative_samples.getNumSamples();
+   size_t epochs_without_improvement = 0; // Contador de épocas sin mejora
+   ```
+
+2. **Ciclo de Entrenamiento por Época:**
 
    Para cada época:
-   
-   - **Mezcla Aleatoria de Muestras:**
-     
-     ```cpp
-     train_positive_samples.shuffle();
-     train_negative_samples.shuffle();
-     ```
 
-     - **Es decir:** Se asegura de que el orden de las muestras no influya en el entrenamiento, mejorando la generalización del modelo.
+   - **Mezcla y Barajado de Muestras Positivas y Negativas:**
 
-   - **Entrenamiento en Muestras Positivas y Negativas:**
+     Se crea una lista combinada de todas las muestras de entrenamiento con sus etiquetas y se baraja aleatoriamente.
 
      ```cpp
-     #pragma omp parallel for schedule(static)
+     // Crear una lista combinada de todas las muestras con sus etiquetas
+     std::vector<std::pair<std::reference_wrapper<const Eigen::VectorXf>, bool>> combined_train_samples;
+     combined_train_samples.reserve(train_positive_size + train_negative_size);
+
      for (size_t i = 0; i < train_positive_size; ++i) {
-         const Eigen::VectorXf& input = train_positive_samples.getSample(i);
-         Eigen::VectorXf output;
-         layer.forward(input, output, true, true, threshold, activation, activation_derivative);
+         combined_train_samples.emplace_back(train_positive_samples.getSample(i), true); // Positivo
      }
+     for (size_t i = 0; i < train_negative_size; ++i) {
+         combined_train_samples.emplace_back(train_negative_samples.getSample(i), false); // Negativo
+     }
+
+     // Barajar la lista combinada
+     std::random_device rd;
+     std::mt19937 g(rd());
+     std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
      ```
 
-     - **Es decir:** Para cada muestra positiva $ x $, se realiza una pasada hacia adelante y se actualizan los parámetros para **maximizar** la bondad $ G(x) $.
+     - **Es decir:** Se mezclan las muestras positivas y negativas en un solo conjunto y se barajan aleatoriamente para asegurar que el modelo vea una variedad de ejemplos durante el entrenamiento, mejorando así su capacidad de generalización.
+
+   - **Entrenamiento en la Lista Combinada Barajada:**
+
+     Se realiza el entrenamiento iterando sobre la lista combinada de muestras, aplicando el método `forward` de la capa con el flag `learn = true` para actualizar los pesos.
 
      ```cpp
+     // Entrenamiento en la lista combinada barajada
      #pragma omp parallel for schedule(static)
-     for (size_t i = 0; i < train_negative_size; ++i) {
-         const Eigen::VectorXf& input = train_negative_samples.getSample(i);
-         Eigen::VectorXf output;
-         layer.forward(input, output, true, false, threshold, activation, activation_derivative);
+     for (size_t i = 0; i < combined_train_samples.size(); ++i) {
+         const Eigen::VectorXf& input = combined_train_samples[i].first.get();
+         bool is_positive = combined_train_samples[i].second;
+         Eigen::VectorXf output; // Variable para almacenar la salida
+         layer.forward(input, output, true, is_positive, threshold, activation, activation_derivative);
      }
      ```
 
-     - **Es decir:** Para cada muestra negativa $ x $, se realiza una pasada hacia adelante y se actualizan los parámetros para **minimizar** la bondad $ G(x) $.
+     - **Es decir:** Para cada muestra en el conjunto combinado, se realiza una pasada hacia adelante y se actualizan los parámetros para maximizar o minimizar la bondad según si la muestra es positiva o negativa.
 
-2. **Evaluación en Conjunto de Validación:**
+   - **Evaluación en Conjunto de Validación:**
 
-   ```cpp
-   size_t correct_positive = 0;
-   size_t correct_negative = 0;
-   
-   // Evaluación en muestras positivas
-   #pragma omp parallel for reduction(+:correct_positive)
-   for (size_t i = 0; i < val_positive_size; ++i) {
-       const Eigen::VectorXf& input = val_positive_samples.getSample(i);
-       Eigen::VectorXf output;
-       layer.forward(input, output, false, true, threshold, activation, activation_derivative);
-   
-       float goodness = output.squaredNorm();
-   
-       if (goodness > threshold) {
-           ++correct_positive;
-       }
-   }
-   
-   // Evaluación en muestras negativas
-   #pragma omp parallel for reduction(+:correct_negative)
-   for (size_t i = 0; i < val_negative_size; ++i) {
-       const Eigen::VectorXf& input = val_negative_samples.getSample(i);
-       Eigen::VectorXf output;
-       layer.forward(input, output, false, false, threshold, activation, activation_derivative);
-   
-       float goodness = output.squaredNorm();
-   
-       if (goodness < threshold) {
-           ++correct_negative;
-       }
-   }
-   ```
+     Después de cada época, se evalúa el modelo en el conjunto de validación para medir su rendimiento y ajustar el umbral si es necesario.
 
-   - **Es decir:**
+     ```cpp
+     // Evaluación en muestras positivas
+     #pragma omp parallel for reduction(+:correct_positive)
+     for (size_t i = 0; i < val_positive_size; ++i) {
+         const Eigen::VectorXf& input = val_positive_samples.getSample(i);
+         Eigen::VectorXf output;
+         layer.forward(input, output, false, true, threshold, activation, activation_derivative);
 
-     - **Para Muestras Positivas:**
+         float goodness = output.squaredNorm();
+         #pragma omp critical
+         {
+             goodness_positive_vals.push_back(goodness);
+         }
 
-       Se considera correcta una predicción si la bondad $ G(x) $ excede el umbral $ \theta $.
+         if (goodness > threshold) {
+             ++correct_positive;
+         }
+     }
 
-       $$
-       \text{correct\_positive} += \mathbb{I}(G(x) > \theta)
-       $$
+     // Evaluación en muestras negativas
+     #pragma omp parallel for reduction(+:correct_negative)
+     for (size_t i = 0; i < val_negative_size; ++i) {
+         const Eigen::VectorXf& input = val_negative_samples.getSample(i);
+         Eigen::VectorXf output;
+         layer.forward(input, output, false, false, threshold, activation, activation_derivative);
 
-     - **Para Muestras Negativas:**
+         float goodness = output.squaredNorm();
+         #pragma omp critical
+         {
+             goodness_negative_vals.push_back(goodness);
+         }
 
-       Se considera correcta una predicción si la bondad $ G(x) $ es inferior al umbral $ \theta $.
+         if (goodness < threshold) {
+             ++correct_negative;
+         }
+     }
+     ```
 
-       $$
-       \text{correct\_negative} += \mathbb{I}(G(x) < \theta)
-       $$
+     - **Es decir:** Se calcula la bondad de cada muestra en el conjunto de validación y se determina si el modelo ha clasificado correctamente la muestra basándose en el umbral actual.
 
-       Donde $ \mathbb{I} $ es la función indicadora.
+   - **Cálculo de la Precisión:**
 
-3. **Cálculo de la Precisión:**
+     Se calcula la precisión total y por clase, y se imprime si `verbose` es verdadero.
 
-   ```cpp
-   double accuracy = (static_cast<double>(correct_positive + correct_negative) /
-                     (val_positive_size + val_negative_size)) * 100.0;
-   ```
+     ```cpp
+     double accuracy = (static_cast<double>(correct_positive + correct_negative) /
+                       (val_positive_size + val_negative_size)) * 100.0;
 
-   - **Es decir:**
+     double accuracyn = (static_cast<double>(correct_negative) /
+                       (val_negative_size)) * 100.0;
 
-     $$
-     \text{Precisión} = \left( \frac{\text{correct\_positive} + \text{correct\_negative}}{N_{\text{validación}}} \right) \times 100\%
-     $$
+     double accuracyp = (static_cast<double>(correct_positive) /
+                       (val_positive_size)) * 100.0;
 
-     Donde $ N_{\text{validación}} $ es el número total de muestras en el conjunto de validación.
+     if (verbose) {
+         std::cout << "Precisión en validación: " << accuracy << "%\n"
+                   << "En los positivos: " << accuracyp << "%\n"
+                   << "En los negativos: " << accuracyn << "%\n";
+     }
+     ```
 
-4. **Selección y Restauración del Mejor Modelo:**
+   - **Actualización del Mejor Modelo y Control de Paciencia:**
 
-   ```cpp
-   if (accuracy > best_score) {
-       best_score = accuracy;
-       epochs_without_improvement = 0;
-   
-       // Guarda el mejor modelo
-       best_layer = layer;
-       best_threshold = threshold;
-   } else {
-       epochs_without_improvement++;
-   }
-   
-   if (epochs_without_improvement >= patience) {
-       layer = best_layer;
-       threshold = best_threshold;
-       epochs_without_improvement = 0;
-   }
-   ```
+     Se verifica si la precisión actual es la mejor hasta el momento. Si es así, se actualiza el mejor modelo y se reinicia el contador de paciencia. Si no hay mejora después de cierto número de épocas (`patience`), se revierte al mejor modelo encontrado hasta ahora.
 
-   - **Es decir:**
+     ```cpp
+     if (accuracy > best_score) {
+         best_score = accuracy;
+         epochs_without_improvement = 0;
 
-     Se mantiene y restaura el mejor modelo encontrado hasta el momento basado en la precisión. Si no hay mejora durante un número determinado de épocas (`patience`), se revierte al mejor modelo.
+         // Guarda el mejor modelo
+         best_layer = layer; // Asumiendo que la clase FullyConnectedLayer tiene un operador de asignación
+         best_threshold = threshold;
+     } else {
+         epochs_without_improvement++;
+     }
 
-5. **Ajuste Dinámico del Umbral:**
+     // Revertir al mejor modelo si no hay mejora en 'patience' épocas
+     if (epochs_without_improvement >= patience) {
+         if (verbose) {
+             std::cout << "No hay mejora en las últimas " << patience << " épocas. Revirtiendo al mejor modelo.\n";
+         }
+         layer = best_layer;
+         threshold = best_threshold;
+         epochs_without_improvement = 0; // Reinicia el contador
+     }
+     ```
 
-   ```cpp
-   if (dynamic_threshold) {
-       float avg_goodness_positive = std::accumulate(goodness_positive_vals.begin(),
-                                                     goodness_positive_vals.end(), 0.0f) / val_positive_size;
-       float avg_goodness_negative = std::accumulate(goodness_negative_vals.begin(),
-                                                     goodness_negative_vals.end(), 0.0f) / val_negative_size;
-   
-       threshold = (avg_goodness_positive + avg_goodness_negative) / 2.0f;
-   }
-   ```
+     - **Es decir:** Se implementa un mecanismo de parada temprana para prevenir sobreajuste y mejorar la capacidad de generalización del modelo.
 
-   - **Es decir:**
+   - **Ajuste Dinámico del Umbral (si está habilitado):**
 
-     Si se habilita, el umbral $ \theta $ se ajusta dinámicamente calculando la media de la bondad de las muestras positivas y negativas:
+     Si `dynamic_threshold` es verdadero, se ajusta el umbral basándose en las bondades promedio de las muestras positivas y negativas.
 
-     $$
-     \theta = \frac{\overline{G}_{\text{positivo}} + \overline{G}_{\text{negativo}}}{2}
-     $$
+     ```cpp
+     // Ajusta dinámicamente el umbral si está habilitado
+     if (dynamic_threshold) {
+         float avg_goodness_positive = std::accumulate(goodness_positive_vals.begin(),
+                                                       goodness_positive_vals.end(), 0.0f) / val_positive_size;
+         float avg_goodness_negative = std::accumulate(goodness_negative_vals.begin(),
+                                                       goodness_negative_vals.end(), 0.0f) / val_negative_size;
 
-     Donde:
-     - $ \overline{G}_{\text{positivo}} $ es la bondad promedio de las muestras positivas.
-     - $ \overline{G}_{\text{negativo}} $ es la bondad promedio de las muestras negativas.
+         threshold = (avg_goodness_positive + avg_goodness_negative) / 2.0f;
+         if (verbose) {
+             std::cout << "Umbral ajustado a: " << threshold << "\n";
+         }
+     }
+     ```
 
-### Funciones de Visualización de Histogramas
+     - **Es decir:** El umbral se actualiza para ser el promedio de las bondades promedio de ambas clases, ayudando a mantener una separación óptima entre las clases.
 
-#### Histograma Combinado de Bondades (`plotGoodnessHistogramsCombined`)
+   - **Guardado de Histogramas Combinados:**
 
-Esta función crea un histograma combinado que muestra la distribución de la bondad para muestras positivas y negativas, facilitando la visualización de la separación entre ambas clases.
+     Se generan y guardan los histogramas combinados de las bondades para cada época, lo cual es útil para visualizar el progreso del entrenamiento.
 
-1. **Cálculo de Histogramas:**
+     ```cpp
+     // Guardar los histogramas combinados de esta época con el nombre único
+     std::string hist_filename;
+     if (epoch < 9) {
+         hist_filename = "histograms/Histograma_Combined_epoch_0" + std::to_string(epoch + 1) + ".png";
+     } else {
+         hist_filename = "histograms/Histograma_Combined_epoch_" + std::to_string(epoch + 1) + ".png";
+     }
 
-   ```cpp
-   cv::calcHist(&goodness_positive, 1, 0, cv::Mat(), hist_positive, 1,
-               &histSize, &histRange, uniform, accumulate);
-   cv::calcHist(&goodness_negative, 1, 0, cv::Mat(), hist_negative, 1,
-               &histSize, &histRange, uniform, accumulate);
-   ```
+     plotGoodnessHistogramsCombined(goodness_positive_vals,
+                                    goodness_negative_vals,
+                                    threshold,
+                                    hist_filename); // Pasar 'hist_filename' como ruta de guardado
 
-   - **Es decir:**
+     if (verbose) {
+         std::cout << "Histograma combinado guardado en: " << hist_filename << "\n";
+     }
+     ```
 
-     Se calcula la frecuencia de valores de bondad en diferentes intervalos (bins) para ambas clases.
+     - **Es decir:** Se visualiza la distribución de bondades de las muestras positivas y negativas para monitorear cómo el modelo está separando ambas clases a lo largo del tiempo.
 
-2. **Normalización y Visualización:**
-
-   ```cpp
-   cv::normalize(hist_positive, hist_positive, 0, 400, cv::NORM_MINMAX);
-   cv::normalize(hist_negative, hist_negative, 0, 400, cv::NORM_MINMAX);
-   
-   // Dibujar los histogramas
-   for (int i = 1; i < histSize; i++) {
-       cv::line(histImageCombined,
-           cv::Point(bin_w * (i - 1), hist_h - cvRound(hist_positive.at<float>(i - 1))),
-           cv::Point(bin_w * i, hist_h - cvRound(hist_positive.at<float>(i))),
-           cv::Scalar(255, 0, 0), 2); // Azul para positivos
-       
-       cv::line(histImageCombined,
-           cv::Point(bin_w * (i - 1), hist_h - cvRound(hist_negative.at<float>(i - 1))),
-           cv::Point(bin_w * i, hist_h - cvRound(hist_negative.at<float>(i))),
-           cv::Scalar(0, 255, 0), 2); // Verde para negativos
-   }
-   ```
-
-   - **Es decir:**
-
-     Los histogramas se normalizan para ajustarse al tamaño de la imagen y se dibujan utilizando líneas continuas para cada bin, coloreando positivamente y negativamente para distinguir las clases.
-
-3. **Visualización del Umbral:**
-
-   ```cpp
-   cv::line(histImageCombined,
-            cv::Point(threshold_x, 0),
-            cv::Point(threshold_x, hist_h),
-            cv::Scalar(0, 0, 0), 2); // Línea negra para el umbral
-   ```
-
-   - **Es decir:**
-
-     Se dibuja una línea vertical en la posición correspondiente al umbral $ \theta $, permitiendo visualizar cómo separa las distribuciones de bondad de las clases positiva y negativa.
+---
 
 ### Función Principal (`trainModel`)
 
-Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos hasta la visualización de resultados.
+Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos hasta la visualización de resultados. En esta versión, se han incorporado nuevas estrategias de entrenamiento, incluyendo múltiples inicializaciones, selección de los mejores modelos (`ntop`), ensamblado de modelos y entrenamiento prolongado del mejor modelo. Actualmente sirve de piscina para ir desarrollando las capacidades del código.
+
+**Descripción Detallada:**
 
 1. **Carga de Conjuntos de Datos:**
 
    ```cpp
-   Dataset positive_samples("positive_images/"); // Directorio de imágenes positivas
-   Dataset negative_samples("negative_images/"); // Directorio de imágenes negativas
+   Dataset positive_samples("data/positive_images/"); // Directorio de imágenes positivas
+   Dataset negative_samples("data/negative_images/"); // Directorio de imágenes negativas
    ```
 
    - **Es decir:** Se cargan y preprocesan las imágenes positivas y negativas para crear conjuntos de datos adecuados para el entrenamiento y la validación.
@@ -730,6 +740,7 @@ Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos h
 2. **División en Entrenamiento y Validación:**
 
    ```cpp
+   // Divide los conjuntos de datos en entrenamiento (80%) y validación (20%)
    splitDataset(positive_samples, 0.8f, train_positive_samples,
                 val_positive_samples);
    splitDataset(negative_samples, 0.8f, train_negative_samples,
@@ -741,106 +752,213 @@ Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos h
 3. **Selección del Optimizador y Configuración Inicial:**
 
    ```cpp
+   // Selecciona el optimizador
    std::shared_ptr<Optimizer> optimizer = selectOptimizer();
-   
+
+   // Pregunta al usuario si desea utilizar un umbral dinámico
    bool dynamic_threshold = false;
    std::cout << "¿Desea utilizar un umbral dinámico? (1 = Sí, 0 = No): ";
    int threshold_choice;
    std::cin >> threshold_choice;
    dynamic_threshold = (threshold_choice == 1);
-   
+
+   // Solicita al usuario el umbral inicial
    float threshold;
    std::cout << "Ingrese el umbral inicial para determinar la bondad: ";
    std::cin >> threshold;
-   
-   size_t epochs;
-   std::cout << "Ingrese el número de épocas de entrenamiento: ";
-   std::cin >> epochs;
    ```
 
-   - **Es decir:** Se configura el optimizador y se establece el umbral $ \theta $ inicial, que es crucial para la clasificación de muestras positivas y negativas.
+   - **Es decir:** Se configura el optimizador y se establece el umbral inicial, que es crucial para la clasificación de muestras positivas y negativas.
 
-4. **Definición de la Función de Activación y su Derivada:**
+4. **Configuración del Entrenamiento con Múltiples Inicializaciones:**
+
+   Se solicita al usuario información sobre el número de inicializaciones, épocas por inicialización y el número de mejores modelos a recordar (`ntop`).
 
    ```cpp
-   auto activation = [](float x) -> float {
-       return x > 0.0f ? x : 0.01f * x; // Leaky ReLU
-   };
-   
-   auto activation_derivative = [](float x) -> float {
-       return x > 0.0f ? 1.0f : 0.01f;
-   };
+   // Solicita al usuario el número total de épocas de entrenamiento largo
+   size_t total_epochs_long;
+   std::cout << "Ingrese el número total de épocas de entrenamiento largo: ";
+   std::cin >> total_epochs_long;
+
+   // Solicita al usuario el tamaño de la capa completamente conectada
+   size_t input_size = train_positive_samples.getInputSize();
+   size_t output_size;
+   std::cout << "Ingrese el tamaño de la capa (número de neuronas): ";
+   std::cin >> output_size;
+
+   // Solicita al usuario la cantidad de inicializaciones y épocas por inicialización
+   size_t num_initializations;
+   size_t initial_epochs;
+   std::cout << "Ingrese el número de inicializaciones iniciales: ";
+   std::cin >> num_initializations;
+   std::cout << "Ingrese el número de épocas por inicialización (1 a 4): ";
+   std::cin >> initial_epochs;
+
+   // Solicita al usuario el número de mejores modelos a recordar (ntop)
+   size_t ntop;
+   std::cout << "Ingrese el número de mejores modelos a recordar (ntop): ";
+   std::cin >> ntop;
+
+   // Configuración de la paciencia (tolerancia)
+   size_t patience;
+   std::cout << "Ingrese el número de épocas de tolerancia sin mejora (patience): ";
+   std::cin >> patience;
    ```
 
-   - **Es decir:**
+   - **Es decir:** Se prepara para realizar múltiples inicializaciones del modelo, entrenando cada uno por un número pequeño de épocas y planeando seleccionar los mejores modelos para formar un ensemble.
 
-     Se define la función de activación **Leaky ReLU** y su derivada:
+5. **Entrenamiento con Múltiples Inicializaciones:**
 
-     $$
-     \sigma(z) = \begin{cases}
-     z & \text{si } z > 0 \\
-     0.01 z & \text{si } z \leq 0
-     \end{cases}
-     $$
-     
-     $$
-     \sigma'(z) = \begin{cases}
-     1 & \text{si } z > 0 \\
-     0.01 & \text{si } z \leq 0
-     \end{cases}
-     $$
-
-5. **Inicialización de la Capa Completamente Conectada:**
+   Se entrena varios modelos con diferentes inicializaciones y se guardan los mejores basados en su rendimiento en el conjunto de validación.
 
    ```cpp
-   FullyConnectedLayer layer(input_size, output_size, optimizer);
+   // Lista para almacenar los mejores ntop modelos y sus puntuaciones
+   std::vector<std::pair<double, std::string>> top_models; // <score, filepath>
+
+   // Realizar múltiples inicializaciones
+   for (size_t init = 0; init < num_initializations; ++init) {
+       // Crear una nueva capa con pesos inicializados aleatoriamente
+       FullyConnectedLayer current_layer(input_size, output_size, optimizer);
+
+       // Entrenar por el número de épocas especificado para la inicialización
+       for (size_t epoch = 0; epoch < initial_epochs; ++epoch) {
+           // Entrenamiento y evaluación
+           // ...
+       }
+
+       // Guardar el mejor modelo de esta inicialización en la carpeta ntop_cache
+       std::string model_filename = "ntop_cache/model_init_" + std::to_string(init + 1) + ".bin";
+       best_init_layer.saveModel(model_filename);
+
+       // Agregar el modelo y su puntuación a la lista de top_models
+       top_models.emplace_back(best_score_init, model_filename);
+
+       // Ordenar la lista de top_models y mantener solo los ntop mejores
+       // ...
+   }
    ```
 
-   - **Es decir:** Se crea una capa completamente conectada con dimensiones de entrada y salida específicas, y se asocia con el optimizador seleccionado.
+   - **Es decir:** Se entrenan varios modelos inicializados aleatoriamente, se evalúan en el conjunto de validación y se guardan los mejores `ntop` modelos para su uso posterior.
 
-6. **Seguimiento del Mejor Modelo:**
+6. **Evaluación y Selección del Mejor Modelo Individual:**
 
    ```cpp
-   double best_score = -std::numeric_limits<double>::infinity();
-   FullyConnectedLayer best_layer = layer; // Copia inicial del modelo
-   float best_threshold = threshold;
+   // Evaluación del mejor modelo individual
+   FullyConnectedLayer best_individual_model(input_size, output_size, optimizer);
+   best_individual_model.loadModel(top_models.front().second);
+
+   // Evaluación en conjunto de validación
+   // ...
    ```
 
-   - **Es decir:** Se inicializan variables para mantener el mejor modelo encontrado durante el entrenamiento, basándose en la precisión en el conjunto de validación.
+   - **Es decir:** Se carga el modelo con la mejor precisión en validación y se evalúa su rendimiento.
 
-7. **Entrenamiento y Evaluación:**
+7. **Creación y Evaluación del Ensemble por Votación:**
 
    ```cpp
-   trainAndEvaluate(train_positive_samples, train_negative_samples,
-                    val_positive_samples, val_negative_samples,
-                    layer, threshold, epochs,
-                    activation, activation_derivative,
-                    true, best_score, dynamic_threshold,
-                    goodness_positive_vals, goodness_negative_vals,
-                    patience, best_layer, best_threshold);
+   // Cargar los ntop mejores modelos para el ensemble
+   std::vector<FullyConnectedLayer> ensemble_models;
+   for (const auto& model_info : top_models) {
+       FullyConnectedLayer model(input_size, output_size, optimizer);
+       model.loadModel(model_info.second);
+       ensemble_models.push_back(model);
+   }
+
+   // Evaluación del ensemble mediante votación en el conjunto de validación
+   // ...
    ```
 
-   - **Es decir:** Se ejecuta el ciclo de entrenamiento, que incluye la actualización de parámetros y la evaluación continua para identificar y mantener el mejor modelo.
+   - **Es decir:** Se crea un ensemble de los mejores modelos y se evalúa su rendimiento mediante votación mayoritaria.
 
-8. **Guardado del Mejor Modelo:**
+8. **Creación y Evaluación del Modelo Promedio:**
 
    ```cpp
-   layer.saveModel(model_path);
+   // Crear el modelo promedio (promediando pesos y biases)
+   FullyConnectedLayer averaged_model = ensemble_models.front(); // Inicializar con el primer modelo
+
+   // Promediar los pesos y biases de los modelos
+   Eigen::MatrixXf accumulated_weights = averaged_model.getWeights();
+   Eigen::VectorXf accumulated_biases = averaged_model.getBiases();
+
+   for (size_t i = 1; i < ensemble_models.size(); ++i) {
+       accumulated_weights += ensemble_models[i].getWeights();
+       accumulated_biases += ensemble_models[i].getBiases();
+   }
+
+   accumulated_weights /= ensemble_models.size();
+   accumulated_biases /= ensemble_models.size();
+
+   averaged_model.setWeights(accumulated_weights);
+   averaged_model.setBiases(accumulated_biases);
+
+   // Evaluación del modelo promedio en el conjunto de validación
+   // ...
    ```
 
-   - **Es decir:** Se guarda el conjunto de parámetros $ \theta $ (pesos y sesgos) que corresponden al mejor desempeño del modelo.
+   - **Es decir:** Se crea un modelo promedio al promediar los pesos y sesgos de los `ntop` mejores modelos, y se evalúa su rendimiento.
 
-9. **Visualización de Resultados:**
+9. **Comparación y Selección del Mejor Modelo para el Entrenamiento Largo:**
 
    ```cpp
-   plotGoodnessHistogramsCombined(goodness_positive_vals,
-                                  goodness_negative_vals,
-                                  threshold,
-                                  final_hist_filename);
-   visualizePCA(layer, val_positive_samples, val_negative_samples, num_components, threshold);
+   // Comparar las precisiones y decidir con cuál modelo continuar
+   double max_accuracy = std::max({ accuracy_individual, accuracy_ensemble_vote, accuracy_averaged });
+
+   FullyConnectedLayer layer(input_size, output_size, optimizer); // Modelo para el entrenamiento largo
+
+   if (max_accuracy == accuracy_averaged) {
+       layer = averaged_model;
+       best_overall_threshold = threshold;
+   } else if (max_accuracy == accuracy_ensemble_vote) {
+       // No podemos entrenar directamente un ensemble, así que usaremos el modelo promedio
+       layer = averaged_model;
+       best_overall_threshold = threshold;
+   } else {
+       layer = best_individual_model;
+       best_overall_threshold = threshold;
+   }
    ```
 
-   - **Es decir:** Se visualizan las distribuciones de bondad y las proyecciones PCA para analizar la separación entre clases y la efectividad del modelo.
+   - **Es decir:** Se selecciona el modelo con mejor rendimiento para continuar con el entrenamiento largo. Si el ensemble por votación tiene el mejor rendimiento, se utiliza el modelo promedio para continuar entrenando.
+
+10. **Entrenamiento Largo del Mejor Modelo Seleccionado:**
+
+    ```cpp
+    // Continuar con el entrenamiento largo utilizando el modelo seleccionado
+    for (size_t epoch = 0; epoch < total_epochs_long; ++epoch) {
+        // Entrenamiento y evaluación
+        // ...
+    }
+
+    // Establecer la capa y umbral al mejor encontrado durante el entrenamiento largo
+    FullyConnectedLayer final_layer = best_overall_layer;
+    threshold = best_overall_threshold;
+    ```
+
+    - **Es decir:** Se continúa entrenando el modelo seleccionado por un número mayor de épocas, aplicando técnicas como parada temprana y ajuste dinámico del umbral.
+
+11. **Guardado del Mejor Modelo Final y Visualización de Resultados:**
+
+    ```cpp
+    // Solicita al usuario la ruta para guardar el modelo final
+    std::string model_path;
+    std::cout << "\nIngrese la ruta para guardar el mejor modelo final (ej., best_model_final.bin): ";
+    std::cin >> model_path;
+    final_layer.saveModel(model_path);
+
+    // Visualización de histogramas de bondad (última época)
+    plotGoodnessHistogramsCombined(goodness_positive_vals,
+                                   goodness_negative_vals,
+                                   threshold,
+                                   final_hist_filename);
+
+    // Visualización PCA
+    int num_components;
+    std::cout << "\nIngrese el número de componentes PCA (2 o 3): ";
+    std::cin >> num_components;
+    visualizePCA(final_layer, val_positive_samples, val_negative_samples, num_components, threshold);
+    ```
+
+    - **Es decir:** Se guarda el mejor modelo final encontrado y se visualizan los resultados mediante histogramas combinados y análisis PCA.
 
 ## Referencias
 

@@ -1,3 +1,5 @@
+//src/main_train.cpp
+
 #include "neural_network.hpp"
 #include "optimizer.hpp"
 #include "scatter_plot_data.hpp"
@@ -110,12 +112,13 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
     std::vector<int> labels(total_samples);
     std::vector<std::string> image_paths(total_samples);
 
-    // Definir la función de activación y su derivada (identidad en este caso)
+    // Define la función de activación y su derivada (Leaky ReLU)
     auto activation = [](float x) -> float {
-        return x;
+        return x > 0.0f ? x : 0.01f * x; // Leaky ReLU
     };
+
     auto activation_derivative = [](float x) -> float {
-        return 1.0f;
+        return x > 0.0f ? 1.0f : 0.01f;
     };
 
     // Recopilar salidas para muestras positivas
@@ -416,7 +419,8 @@ void plotGoodnessHistograms(const std::vector<float>& goodness_positive_vals,
     cv::imwrite(pos_hist_path, histImagePositive);
     cv::imwrite(neg_hist_path, histImageNegative);
 }
-
+/* Sirve para a futuro construir un método que controle el aprendizaje de varias capas
+por ahora comentado
 // ================================
 // Funciones de Entrenamiento y Evaluación
 // ================================
@@ -587,7 +591,7 @@ void trainAndEvaluate(Dataset& train_positive_samples,
         }
     }
 }
-
+*/
 
 
 /**
