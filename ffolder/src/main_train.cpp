@@ -1,5 +1,3 @@
-// src/main_train.cpp
-
 #include "neural_network.hpp"
 #include "optimizer.hpp"
 #include "scatter_plot_data.hpp"
@@ -88,7 +86,6 @@ std::shared_ptr<Optimizer> selectOptimizer() {
         return std::make_shared<AdamOptimizer>();
     }
 }
-
 
 // ================================
 // Funciones para Visualización
@@ -631,6 +628,9 @@ void trainModel() {
         std::cout << "Ingrese el umbral inicial para determinar la bondad: ";
         std::cin >> threshold;
 
+        // Declaramos la variable para almacenar el mejor umbral global
+        float best_overall_threshold = threshold;
+
         // Solicita al usuario el número total de épocas de entrenamiento largo
         size_t total_epochs_long;
         std::cout << "Ingrese el número total de épocas de entrenamiento largo: ";
@@ -655,14 +655,6 @@ void trainModel() {
         std::cout << "Ingrese el tamaño de la capa (número de neuronas): ";
         std::cin >> output_size;
 
-        // Inicializa la capa completamente conectada
-        FullyConnectedLayer initial_layer(input_size, output_size, optimizer);
-
-        // Inicialización de variables para el seguimiento del mejor modelo general
-        double best_score_overall = -std::numeric_limits<double>::infinity();
-        FullyConnectedLayer best_overall_layer = initial_layer; // Copia inicial del modelo
-        float best_overall_threshold = threshold;
-
         // Solicita al usuario la cantidad de inicializaciones y épocas por inicialización
         size_t num_initializations;
         size_t initial_epochs;
@@ -671,13 +663,22 @@ void trainModel() {
         std::cout << "Ingrese el número de épocas por inicialización (1 a 4): ";
         std::cin >> initial_epochs;
 
+        // Solicita al usuario el número de mejores modelos a recordar (ntop)
+        size_t ntop;
+        std::cout << "Ingrese el número de mejores modelos a recordar (ntop): ";
+        std::cin >> ntop;
+
         // Configuración de la paciencia (tolerancia)
         size_t patience;
         std::cout << "Ingrese el número de épocas de tolerancia sin mejora (patience): ";
         std::cin >> patience;
 
-        // Asegurarse de que la carpeta principal para los histogramas exista
+        // Asegurarse de que la carpeta principal para los histogramas y ntop cache existan
         fs::create_directories("histograms");
+        fs::create_directories("ntop_cache");
+
+        // Lista para almacenar los mejores ntop modelos y sus puntuaciones
+        std::vector<std::pair<double, std::string>> top_models; // <score, filepath>
 
         // Realizar múltiples inicializaciones
         for (size_t init = 0; init < num_initializations; ++init) {
@@ -787,8 +788,8 @@ void trainModel() {
                     best_score_init = accuracy;
                     epochs_without_improvement_init = 0;
 
-                    // Guarda el mejor modelo
-                    best_init_layer = current_layer; // Asumiendo que la clase FullyConnectedLayer tiene un operador de asignación
+                    // Guarda el mejor modelo de esta inicialización
+                    best_init_layer = current_layer;
                     best_init_threshold = threshold;
                 } else {
                     epochs_without_improvement_init++;
@@ -800,6 +801,7 @@ void trainModel() {
                     current_layer = best_init_layer;
                     threshold = best_init_threshold;
                     epochs_without_improvement_init = 0; // Reinicia el contador
+                    break; // Salir del bucle de épocas para esta inicialización
                 }
 
                 // Ajusta dinámicamente el umbral si está habilitado
@@ -820,29 +822,223 @@ void trainModel() {
                 plotGoodnessHistogramsCombined(goodness_positive_vals,
                                                goodness_negative_vals,
                                                threshold,
-                                               hist_filename); // Pasar 'hist_filename' como ruta de guardado
+                                               hist_filename);
 
                 std::cout << "Histograma combinado guardado en: " << hist_filename << "\n";
             }
 
-            // Evaluar si este modelo inicial es el mejor general
-            if (best_score_init > best_score_overall) {
-                best_score_overall = best_score_init;
-                best_overall_layer = best_init_layer;
-                best_overall_threshold = best_init_threshold;
-                std::cout << "Nuevo mejor modelo encontrado en la inicialización " << (init + 1) << " con precisión: " << best_score_overall << "%\n";
+            // Guardar el mejor modelo de esta inicialización en la carpeta ntop_cache
+            std::string model_filename = "ntop_cache/model_init_" + std::to_string(init + 1) + ".bin";
+            best_init_layer.saveModel(model_filename);
+
+            // Agregar el modelo y su puntuación a la lista de top_models
+            top_models.emplace_back(best_score_init, model_filename);
+
+            // Ordenar la lista de top_models y mantener solo los ntop mejores
+            std::sort(top_models.begin(), top_models.end(),
+                      [](const std::pair<double, std::string>& a, const std::pair<double, std::string>& b) {
+                          return a.first > b.first; // Orden descendente por puntuación
+                      });
+
+            if (top_models.size() > ntop) {
+                // Eliminar los modelos adicionales y sus archivos para liberar espacio
+                for (size_t i = ntop; i < top_models.size(); ++i) {
+                    fs::remove(top_models[i].second); // Eliminar el archivo del modelo
+                }
+                top_models.resize(ntop); // Mantener solo los ntop mejores
+            }
+
+            std::cout << "Modelo guardado en: " << model_filename << "\n";
+        }
+
+        // Evaluación del mejor modelo individual
+        std::cout << "\n--- Evaluando el mejor modelo individual en el conjunto de validación ---\n";
+        FullyConnectedLayer best_individual_model(input_size, output_size, optimizer);
+        best_individual_model.loadModel(top_models.front().second);
+
+        size_t correct_positive_individual = 0;
+        size_t correct_negative_individual = 0;
+
+        // Evaluación en muestras positivas
+        for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+            const Eigen::VectorXf& input = val_positive_samples.getSample(i);
+            Eigen::VectorXf output;
+            best_individual_model.forward(input, output, false, true, threshold, activation, activation_derivative);
+
+            float goodness = output.squaredNorm();
+
+            if (goodness > threshold) {
+                ++correct_positive_individual;
             }
         }
 
-        // Establecer la capa y umbral al mejor encontrado durante las inicializaciones
-        FullyConnectedLayer layer = best_overall_layer;
-        threshold = best_overall_threshold;
-        double best_score = best_score_overall;
+        // Evaluación en muestras negativas
+        for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+            const Eigen::VectorXf& input = val_negative_samples.getSample(i);
+            Eigen::VectorXf output;
+            best_individual_model.forward(input, output, false, false, threshold, activation, activation_derivative);
 
-        // Continuar con el entrenamiento largo utilizando el mejor modelo inicial
-        std::cout << "\n--- Comenzando el entrenamiento largo con el mejor modelo inicial ---\n";
+            float goodness = output.squaredNorm();
+
+            if (goodness < threshold) {
+                ++correct_negative_individual;
+            }
+        }
+
+        double accuracy_individual = (static_cast<double>(correct_positive_individual + correct_negative_individual) /
+                                     (val_positive_samples.getNumSamples() + val_negative_samples.getNumSamples())) * 100.0;
+
+        std::cout << "Precisión del mejor modelo individual: " << accuracy_individual << "%\n";
+
+        // Cargar los ntop mejores modelos para el ensemble
+        std::vector<FullyConnectedLayer> ensemble_models;
+        for (const auto& model_info : top_models) {
+            FullyConnectedLayer model(input_size, output_size, optimizer);
+            model.loadModel(model_info.second);
+            ensemble_models.push_back(model);
+            std::cout << "Modelo cargado desde: " << model_info.second << " con precisión: " << model_info.first << "%\n";
+        }
+
+        // Evaluación del ensemble mediante votación en el conjunto de validación
+        std::cout << "\n--- Evaluando el ensemble mediante votación en el conjunto de validación ---\n";
+        size_t correct_positive_ensemble_vote = 0;
+        size_t correct_negative_ensemble_vote = 0;
+
+        // Evaluación en muestras positivas
+        for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+            const Eigen::VectorXf& input = val_positive_samples.getSample(i);
+            int votes = 0;
+
+            for (auto& model : ensemble_models) {
+                Eigen::VectorXf output;
+                model.forward(input, output, false, true, threshold, activation, activation_derivative);
+                float goodness = output.squaredNorm();
+
+                if (goodness > threshold) {
+                    votes++;
+                }
+            }
+
+            if (votes > static_cast<int>(ensemble_models.size() / 2)) {
+                ++correct_positive_ensemble_vote;
+            }
+        }
+
+        // Evaluación en muestras negativas
+        for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+            const Eigen::VectorXf& input = val_negative_samples.getSample(i);
+            int votes = 0;
+
+            for (auto& model : ensemble_models) {
+                Eigen::VectorXf output;
+                model.forward(input, output, false, false, threshold, activation, activation_derivative);
+                float goodness = output.squaredNorm();
+
+                if (goodness < threshold) {
+                    votes++;
+                }
+            }
+
+            if (votes > static_cast<int>(ensemble_models.size() / 2)) {
+                ++correct_negative_ensemble_vote;
+            }
+        }
+
+        double accuracy_ensemble_vote = (static_cast<double>(correct_positive_ensemble_vote + correct_negative_ensemble_vote) /
+                                        (val_positive_samples.getNumSamples() + val_negative_samples.getNumSamples())) * 100.0;
+
+        std::cout << "Precisión del ensemble mediante votación: " << accuracy_ensemble_vote << "%\n";
+
+        // Crear el modelo promedio (promediando pesos y biases)
+        std::cout << "\n--- Creando el modelo promedio (promedio de pesos y biases) ---\n";
+        FullyConnectedLayer averaged_model = ensemble_models.front(); // Inicializar con el primer modelo
+
+        // Promediar los pesos y biases de los modelos
+        Eigen::MatrixXf accumulated_weights = averaged_model.getWeights();
+        Eigen::VectorXf accumulated_biases = averaged_model.getBiases();
+
+        for (size_t i = 1; i < ensemble_models.size(); ++i) {
+            accumulated_weights += ensemble_models[i].getWeights();
+            accumulated_biases += ensemble_models[i].getBiases();
+        }
+
+        accumulated_weights /= ensemble_models.size();
+        accumulated_biases /= ensemble_models.size();
+
+        averaged_model.setWeights(accumulated_weights);
+        averaged_model.setBiases(accumulated_biases);
+
+        // Evaluación del modelo promedio en el conjunto de validación
+        std::cout << "\n--- Evaluando el modelo promedio en el conjunto de validación ---\n";
+        size_t correct_positive_averaged = 0;
+        size_t correct_negative_averaged = 0;
+
+        // Evaluación en muestras positivas
+        for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+            const Eigen::VectorXf& input = val_positive_samples.getSample(i);
+            Eigen::VectorXf output;
+            averaged_model.forward(input, output, false, true, threshold, activation, activation_derivative);
+
+            float goodness = output.squaredNorm();
+
+            if (goodness > threshold) {
+                ++correct_positive_averaged;
+            }
+        }
+
+        // Evaluación en muestras negativas
+        for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+            const Eigen::VectorXf& input = val_negative_samples.getSample(i);
+            Eigen::VectorXf output;
+            averaged_model.forward(input, output, false, false, threshold, activation, activation_derivative);
+
+            float goodness = output.squaredNorm();
+
+            if (goodness < threshold) {
+                ++correct_negative_averaged;
+            }
+        }
+
+        double accuracy_averaged = (static_cast<double>(correct_positive_averaged + correct_negative_averaged) /
+                                   (val_positive_samples.getNumSamples() + val_negative_samples.getNumSamples())) * 100.0;
+
+        std::cout << "Precisión del modelo promedio: " << accuracy_averaged << "%\n";
+
+        // Comparar las precisiones y decidir con cuál modelo continuar
+        std::cout << "\n--- Comparación de precisiones ---\n";
+        std::cout << "Precisión del mejor modelo individual: " << accuracy_individual << "%\n";
+        std::cout << "Precisión del ensemble mediante votación: " << accuracy_ensemble_vote << "%\n";
+        std::cout << "Precisión del modelo promedio: " << accuracy_averaged << "%\n";
+
+        // Determinar el modelo con mejor precisión
+        double max_accuracy = std::max({ accuracy_individual, accuracy_ensemble_vote, accuracy_averaged });
+
+        FullyConnectedLayer layer(input_size, output_size, optimizer); // Modelo para el entrenamiento largo
+
+        if (max_accuracy == accuracy_averaged) {
+            std::cout << "\nEl modelo promedio tiene la mejor precisión.\n";
+            layer = averaged_model;
+            best_overall_threshold = threshold;
+        } else if (max_accuracy == accuracy_ensemble_vote) {
+            std::cout << "\nEl ensemble mediante votación tiene la mejor precisión.\n";
+            // No podemos entrenar directamente un ensemble, así que usaremos el modelo promedio
+            layer = averaged_model;
+            best_overall_threshold = threshold;
+        } else {
+            std::cout << "\nEl mejor modelo individual tiene la mejor precisión.\n";
+            layer = best_individual_model;
+            best_overall_threshold = threshold;
+        }
+
+        // Continuar con el entrenamiento largo utilizando el modelo seleccionado
+        std::cout << "\n--- Comenzando el entrenamiento largo ---\n";
 
         size_t epochs_without_improvement = 0; // Contador de épocas sin mejora
+        double best_score = max_accuracy;
+        FullyConnectedLayer best_overall_layer = layer;
+
+        size_t val_positive_size = val_positive_samples.getNumSamples();
+        size_t val_negative_size = val_negative_samples.getNumSamples();
 
         for (size_t epoch = 0; epoch < total_epochs_long; ++epoch) {
             std::cout << "\n--- Entrenamiento Largo - Época " << (epoch + 1) << "/" << total_epochs_long << " ---\n";
@@ -885,7 +1081,7 @@ void trainModel() {
 
             // Evaluación en muestras positivas
             #pragma omp parallel for reduction(+:correct_positive)
-            for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+            for (size_t i = 0; i < val_positive_size; ++i) {
                 const Eigen::VectorXf& input = val_positive_samples.getSample(i);
                 Eigen::VectorXf output;
                 layer.forward(input, output, false, true, threshold, activation, activation_derivative);
@@ -903,7 +1099,7 @@ void trainModel() {
 
             // Evaluación en muestras negativas
             #pragma omp parallel for reduction(+:correct_negative)
-            for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+            for (size_t i = 0; i < val_negative_size; ++i) {
                 const Eigen::VectorXf& input = val_negative_samples.getSample(i);
                 Eigen::VectorXf output;
                 layer.forward(input, output, false, false, threshold, activation, activation_derivative);
@@ -921,13 +1117,13 @@ void trainModel() {
 
             // Calcula la precisión
             double accuracy = (static_cast<double>(correct_positive + correct_negative) /
-                              (val_positive_samples.getNumSamples() + val_negative_samples.getNumSamples())) * 100.0;
+                              (val_positive_size + val_negative_size)) * 100.0;
 
             double accuracy_positive = (static_cast<double>(correct_positive) /
-                                       val_positive_samples.getNumSamples()) * 100.0;
+                                       val_positive_size) * 100.0;
 
             double accuracy_negative = (static_cast<double>(correct_negative) /
-                                       val_negative_samples.getNumSamples()) * 100.0;
+                                       val_negative_size) * 100.0;
 
             std::cout << "Precisión en validación: " << accuracy << "%\n"
                       << "Precisión en positivos: " << accuracy_positive << "%\n"
@@ -940,8 +1136,7 @@ void trainModel() {
 
                 // Guarda el mejor modelo
                 best_overall_layer = layer;
-                best_overall_threshold = threshold;
-
+                best_overall_threshold = threshold; // Actualizamos el mejor umbral
                 std::cout << "Nuevo mejor modelo general encontrado con precisión: " << best_score << "%\n";
             } else {
                 epochs_without_improvement++;
@@ -951,7 +1146,7 @@ void trainModel() {
             if (epochs_without_improvement >= patience) {
                 std::cout << "No hay mejora en las últimas " << patience << " épocas. Revirtiendo al mejor modelo general.\n";
                 layer = best_overall_layer;
-                threshold = best_overall_threshold;
+                threshold = best_overall_threshold; // Revertimos al mejor umbral
                 epochs_without_improvement = 0; // Reinicia el contador
             }
 
@@ -972,14 +1167,14 @@ void trainModel() {
             plotGoodnessHistogramsCombined(goodness_positive_vals,
                                            goodness_negative_vals,
                                            threshold,
-                                           hist_filename); // Pasar 'hist_filename' como ruta de guardado
+                                           hist_filename);
 
             std::cout << "Histograma combinado guardado en: " << hist_filename << "\n";
         }
 
         // Establecer la capa y umbral al mejor encontrado durante el entrenamiento largo
         FullyConnectedLayer final_layer = best_overall_layer;
-        threshold = best_overall_threshold;
+        threshold = best_overall_threshold; // Usamos el mejor umbral encontrado
         double final_best_score = best_score;
 
         // Solicita al usuario la ruta para guardar el modelo final
@@ -996,20 +1191,19 @@ void trainModel() {
         plotGoodnessHistogramsCombined(goodness_positive_vals,
                                        goodness_negative_vals,
                                        threshold,
-                                       final_hist_filename); // Guardar el histograma final
+                                       final_hist_filename);
         std::cout << "Histograma final combinado guardado en: " << final_hist_filename << "\n";
 
         // Visualización PCA
         int num_components;
         std::cout << "\nIngrese el número de componentes PCA (2 o 3): ";
         std::cin >> num_components;
-        visualizePCA(final_layer, val_positive_samples, val_negative_samples, num_components, threshold); // Pasar 'threshold'
+        visualizePCA(final_layer, val_positive_samples, val_negative_samples, num_components, threshold);
 
     } catch (const std::exception& ex) {
         std::cerr << "Error durante el entrenamiento: " << ex.what() << "\n";
     }
 }
-
 
 // Función principal del programa
 int main() {
