@@ -423,7 +423,7 @@ void plotGoodnessHistograms(const std::vector<float>& goodness_positive_vals,
 // ================================
 // Funciones de Entrenamiento y Evaluación
 // ================================
-
+// Función de entrenamiento y evaluación modificada para barajar las muestras positivas y negativas
 void trainAndEvaluate(Dataset& train_positive_samples,
                       Dataset& train_negative_samples,
                       Dataset& val_positive_samples,
@@ -452,23 +452,30 @@ void trainAndEvaluate(Dataset& train_positive_samples,
             std::cout << "\n--- Época " << (epoch + 1) << "/" << epochs << " ---\n";
         }
 
-        train_positive_samples.shuffle();
-        train_negative_samples.shuffle();
+        // Crear una lista combinada de todas las muestras con sus etiquetas
+        // Usar std::reference_wrapper para almacenar referencias
+        std::vector<std::pair<std::reference_wrapper<const Eigen::VectorXf>, bool>> combined_train_samples;
+        combined_train_samples.reserve(train_positive_size + train_negative_size);
 
-        // Entrenamiento en muestras positivas
-        #pragma omp parallel for schedule(static)
         for (size_t i = 0; i < train_positive_size; ++i) {
-            const Eigen::VectorXf& input = train_positive_samples.getSample(i);
-            Eigen::VectorXf output;
-            layer.forward(input, output, true, true, threshold, activation, activation_derivative);
+            combined_train_samples.emplace_back(train_positive_samples.getSample(i), true); // Positivo
+        }
+        for (size_t i = 0; i < train_negative_size; ++i) {
+            combined_train_samples.emplace_back(train_negative_samples.getSample(i), false); // Negativo
         }
 
-        // Entrenamiento en muestras negativas
+        // Barajar la lista combinada
+        std::random_device rd;
+        std::mt19937 g(rd());
+        std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
+
+        // Entrenamiento en la lista combinada barajada
         #pragma omp parallel for schedule(static)
-        for (size_t i = 0; i < train_negative_size; ++i) {
-            const Eigen::VectorXf& input = train_negative_samples.getSample(i);
-            Eigen::VectorXf output;
-            layer.forward(input, output, true, false, threshold, activation, activation_derivative);
+        for (size_t i = 0; i < combined_train_samples.size(); ++i) {
+            const Eigen::VectorXf& input = combined_train_samples[i].first.get();
+            bool is_positive = combined_train_samples[i].second;
+            Eigen::VectorXf output; // Variable para almacenar la salida
+            layer.forward(input, output, true, is_positive, threshold, activation, activation_derivative);
         }
 
         // Evaluación en conjunto de validación
@@ -517,15 +524,17 @@ void trainAndEvaluate(Dataset& train_positive_samples,
         // Calcula la precisión
         double accuracy = (static_cast<double>(correct_positive + correct_negative) /
                           (val_positive_size + val_negative_size)) * 100.0;
-	
-	    double accuracyn = (static_cast<double>(correct_negative) /
+
+        double accuracyn = (static_cast<double>(correct_negative) /
                           (val_negative_size)) * 100.0;
 
-	    double accuracyp = (static_cast<double>(correct_positive) /
+        double accuracyp = (static_cast<double>(correct_positive) /
                           (val_positive_size)) * 100.0;
 
         if (verbose) {
-            std::cout << "Precisión en validación: " << accuracy << "%\n" << "En los positivos: " << accuracyp << "%\n" <<"En los negativos: " << accuracyn << "%\n";
+            std::cout << "Precisión en validación: " << accuracy << "%\n"
+                      << "En los positivos: " << accuracyp << "%\n"
+                      << "En los negativos: " << accuracyn << "%\n";
         }
 
         // Verifica si esta es la mejor precisión hasta ahora
@@ -563,16 +572,14 @@ void trainAndEvaluate(Dataset& train_positive_samples,
             }
         }
 
-        // Declare hist_filename before the if-else block
+        // Guardar los histogramas combinados de esta época con el nombre único
         std::string hist_filename;
-
         if (epoch < 9) {
             hist_filename = "histograms/Histograma_Combined_epoch_0" + std::to_string(epoch + 1) + ".png";
         } else {
             hist_filename = "histograms/Histograma_Combined_epoch_" + std::to_string(epoch + 1) + ".png";
         }
 
-        // Guardar los histogramas combinados de esta época con el nombre único
         plotGoodnessHistogramsCombined(goodness_positive_vals,
                                        goodness_negative_vals,
                                        threshold,
@@ -583,6 +590,8 @@ void trainAndEvaluate(Dataset& train_positive_samples,
         }
     }
 }
+
+
 
 /**
  * @brief Función principal que maneja el flujo de entrenamiento del modelo.
@@ -622,10 +631,10 @@ void trainModel() {
         std::cout << "Ingrese el umbral inicial para determinar la bondad: ";
         std::cin >> threshold;
 
-        // Solicita al usuario el número de épocas de entrenamiento
-        size_t epochs;
-        std::cout << "Ingrese el número de épocas de entrenamiento: ";
-        std::cin >> epochs;
+        // Solicita al usuario el número total de épocas de entrenamiento largo
+        size_t total_epochs_long;
+        std::cout << "Ingrese el número total de épocas de entrenamiento largo: ";
+        std::cin >> total_epochs_long;
 
         // Define la función de activación y su derivada (Leaky ReLU)
         auto activation = [](float x) -> float {
@@ -647,12 +656,20 @@ void trainModel() {
         std::cin >> output_size;
 
         // Inicializa la capa completamente conectada
-        FullyConnectedLayer layer(input_size, output_size, optimizer);
+        FullyConnectedLayer initial_layer(input_size, output_size, optimizer);
 
-        // Inicializa variables para el seguimiento del mejor modelo
-        double best_score = -std::numeric_limits<double>::infinity();
-        FullyConnectedLayer best_layer = layer; // Copia inicial del modelo
-        float best_threshold = threshold;
+        // Inicialización de variables para el seguimiento del mejor modelo general
+        double best_score_overall = -std::numeric_limits<double>::infinity();
+        FullyConnectedLayer best_overall_layer = initial_layer; // Copia inicial del modelo
+        float best_overall_threshold = threshold;
+
+        // Solicita al usuario la cantidad de inicializaciones y épocas por inicialización
+        size_t num_initializations;
+        size_t initial_epochs;
+        std::cout << "Ingrese el número de inicializaciones iniciales: ";
+        std::cin >> num_initializations;
+        std::cout << "Ingrese el número de épocas por inicialización (1 a 4): ";
+        std::cin >> initial_epochs;
 
         // Configuración de la paciencia (tolerancia)
         size_t patience;
@@ -662,25 +679,315 @@ void trainModel() {
         // Asegurarse de que la carpeta principal para los histogramas exista
         fs::create_directories("histograms");
 
-        // Entrena y evalúa la capa
-        trainAndEvaluate(train_positive_samples, train_negative_samples,
-                         val_positive_samples, val_negative_samples,
-                         layer, threshold, epochs,
-                         activation, activation_derivative,
-                         true, best_score, dynamic_threshold,
-                         goodness_positive_vals, goodness_negative_vals,
-                         patience, best_layer, best_threshold);
+        // Realizar múltiples inicializaciones
+        for (size_t init = 0; init < num_initializations; ++init) {
+            std::cout << "\n--- Inicialización " << (init + 1) << "/" << num_initializations << " ---\n";
 
-        // Restaurar el mejor modelo después del entrenamiento
-        layer = best_layer;
-        threshold = best_threshold;
+            // Crear una nueva capa con pesos inicializados aleatoriamente
+            FullyConnectedLayer current_layer(input_size, output_size, optimizer);
 
-        // Solicita al usuario la ruta para guardar el modelo
+            // Inicialización de variables para el seguimiento del mejor modelo en esta inicialización
+            double best_score_init = -std::numeric_limits<double>::infinity();
+            FullyConnectedLayer best_init_layer = current_layer; // Copia inicial del modelo
+            float best_init_threshold = threshold;
+            size_t epochs_without_improvement_init = 0;
+
+            // Entrenar por el número de épocas especificado para la inicialización
+            for (size_t epoch = 0; epoch < initial_epochs; ++epoch) {
+                std::cout << "\n--- Inicialización " << (init + 1) << " - Época " << (epoch + 1) << "/" << initial_epochs << " ---\n";
+
+                // Mezclar y barajar los datos positivos y negativos
+                train_positive_samples.shuffle();
+                train_negative_samples.shuffle();
+
+                // Crear una lista combinada de todas las muestras con sus etiquetas
+                std::vector<std::pair<std::reference_wrapper<const Eigen::VectorXf>, bool>> combined_train_samples;
+                combined_train_samples.reserve(train_positive_samples.getNumSamples() + train_negative_samples.getNumSamples());
+
+                for (size_t i = 0; i < train_positive_samples.getNumSamples(); ++i) {
+                    combined_train_samples.emplace_back(train_positive_samples.getSample(i), true); // Positivo
+                }
+                for (size_t i = 0; i < train_negative_samples.getNumSamples(); ++i) {
+                    combined_train_samples.emplace_back(train_negative_samples.getSample(i), false); // Negativo
+                }
+
+                // Barajar la lista combinada
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
+
+                // Entrenamiento en la lista combinada barajada
+                #pragma omp parallel for schedule(static)
+                for (size_t i = 0; i < combined_train_samples.size(); ++i) {
+                    const Eigen::VectorXf& input = combined_train_samples[i].first.get();
+                    bool is_positive = combined_train_samples[i].second;
+                    Eigen::VectorXf output;
+                    current_layer.forward(input, output, true, is_positive, threshold, activation, activation_derivative);
+                }
+
+                // Evaluación en conjunto de validación
+                size_t correct_positive = 0;
+                size_t correct_negative = 0;
+
+                goodness_positive_vals.clear();
+                goodness_negative_vals.clear();
+
+                // Evaluación en muestras positivas
+                #pragma omp parallel for reduction(+:correct_positive)
+                for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+                    const Eigen::VectorXf& input = val_positive_samples.getSample(i);
+                    Eigen::VectorXf output;
+                    current_layer.forward(input, output, false, true, threshold, activation, activation_derivative);
+
+                    float goodness = output.squaredNorm();
+                    #pragma omp critical
+                    {
+                        goodness_positive_vals.push_back(goodness);
+                    }
+
+                    if (goodness > threshold) {
+                        ++correct_positive;
+                    }
+                }
+
+                // Evaluación en muestras negativas
+                #pragma omp parallel for reduction(+:correct_negative)
+                for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+                    const Eigen::VectorXf& input = val_negative_samples.getSample(i);
+                    Eigen::VectorXf output;
+                    current_layer.forward(input, output, false, false, threshold, activation, activation_derivative);
+
+                    float goodness = output.squaredNorm();
+                    #pragma omp critical
+                    {
+                        goodness_negative_vals.push_back(goodness);
+                    }
+
+                    if (goodness < threshold) {
+                        ++correct_negative;
+                    }
+                }
+
+                // Calcula la precisión
+                double accuracy = (static_cast<double>(correct_positive + correct_negative) /
+                                  (val_positive_samples.getNumSamples() + val_negative_samples.getNumSamples())) * 100.0;
+
+                double accuracy_positive = (static_cast<double>(correct_positive) /
+                                           val_positive_samples.getNumSamples()) * 100.0;
+
+                double accuracy_negative = (static_cast<double>(correct_negative) /
+                                           val_negative_samples.getNumSamples()) * 100.0;
+
+                std::cout << "Precisión en validación: " << accuracy << "%\n"
+                          << "Precisión en positivos: " << accuracy_positive << "%\n"
+                          << "Precisión en negativos: " << accuracy_negative << "%\n";
+
+                // Verifica si esta es la mejor precisión hasta ahora en esta inicialización
+                if (accuracy > best_score_init) {
+                    best_score_init = accuracy;
+                    epochs_without_improvement_init = 0;
+
+                    // Guarda el mejor modelo
+                    best_init_layer = current_layer; // Asumiendo que la clase FullyConnectedLayer tiene un operador de asignación
+                    best_init_threshold = threshold;
+                } else {
+                    epochs_without_improvement_init++;
+                }
+
+                // Revertir al mejor modelo si no hay mejora en 'patience' épocas
+                if (epochs_without_improvement_init >= patience) {
+                    std::cout << "No hay mejora en las últimas " << patience << " épocas. Revirtiendo al mejor modelo de esta inicialización.\n";
+                    current_layer = best_init_layer;
+                    threshold = best_init_threshold;
+                    epochs_without_improvement_init = 0; // Reinicia el contador
+                }
+
+                // Ajusta dinámicamente el umbral si está habilitado
+                if (dynamic_threshold) {
+                    float avg_goodness_positive = std::accumulate(goodness_positive_vals.begin(),
+                                                                  goodness_positive_vals.end(), 0.0f) / goodness_positive_vals.size();
+                    float avg_goodness_negative = std::accumulate(goodness_negative_vals.begin(),
+                                                                  goodness_negative_vals.end(), 0.0f) / goodness_negative_vals.size();
+
+                    threshold = (avg_goodness_positive + avg_goodness_negative) / 2.0f;
+                    std::cout << "Umbral ajustado a: " << threshold << "\n";
+                }
+
+                // Guardar los histogramas combinados de esta época con el nombre único
+                std::string hist_filename = "histograms/Init_" + std::to_string(init + 1) +
+                                            "_Epoch_" + std::to_string(epoch + 1) + ".png";
+
+                plotGoodnessHistogramsCombined(goodness_positive_vals,
+                                               goodness_negative_vals,
+                                               threshold,
+                                               hist_filename); // Pasar 'hist_filename' como ruta de guardado
+
+                std::cout << "Histograma combinado guardado en: " << hist_filename << "\n";
+            }
+
+            // Evaluar si este modelo inicial es el mejor general
+            if (best_score_init > best_score_overall) {
+                best_score_overall = best_score_init;
+                best_overall_layer = best_init_layer;
+                best_overall_threshold = best_init_threshold;
+                std::cout << "Nuevo mejor modelo encontrado en la inicialización " << (init + 1) << " con precisión: " << best_score_overall << "%\n";
+            }
+        }
+
+        // Establecer la capa y umbral al mejor encontrado durante las inicializaciones
+        FullyConnectedLayer layer = best_overall_layer;
+        threshold = best_overall_threshold;
+        double best_score = best_score_overall;
+
+        // Continuar con el entrenamiento largo utilizando el mejor modelo inicial
+        std::cout << "\n--- Comenzando el entrenamiento largo con el mejor modelo inicial ---\n";
+
+        size_t epochs_without_improvement = 0; // Contador de épocas sin mejora
+
+        for (size_t epoch = 0; epoch < total_epochs_long; ++epoch) {
+            std::cout << "\n--- Entrenamiento Largo - Época " << (epoch + 1) << "/" << total_epochs_long << " ---\n";
+
+            // Mezclar y barajar los datos positivos y negativos
+            train_positive_samples.shuffle();
+            train_negative_samples.shuffle();
+
+            // Crear una lista combinada de todas las muestras con sus etiquetas
+            std::vector<std::pair<std::reference_wrapper<const Eigen::VectorXf>, bool>> combined_train_samples;
+            combined_train_samples.reserve(train_positive_samples.getNumSamples() + train_negative_samples.getNumSamples());
+
+            for (size_t i = 0; i < train_positive_samples.getNumSamples(); ++i) {
+                combined_train_samples.emplace_back(train_positive_samples.getSample(i), true); // Positivo
+            }
+            for (size_t i = 0; i < train_negative_samples.getNumSamples(); ++i) {
+                combined_train_samples.emplace_back(train_negative_samples.getSample(i), false); // Negativo
+            }
+
+            // Barajar la lista combinada
+            std::random_device rd;
+            std::mt19937 g(rd());
+            std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
+
+            // Entrenamiento en la lista combinada barajada
+            #pragma omp parallel for schedule(static)
+            for (size_t i = 0; i < combined_train_samples.size(); ++i) {
+                const Eigen::VectorXf& input = combined_train_samples[i].first.get();
+                bool is_positive = combined_train_samples[i].second;
+                Eigen::VectorXf output;
+                layer.forward(input, output, true, is_positive, threshold, activation, activation_derivative);
+            }
+
+            // Evaluación en conjunto de validación
+            size_t correct_positive = 0;
+            size_t correct_negative = 0;
+
+            goodness_positive_vals.clear();
+            goodness_negative_vals.clear();
+
+            // Evaluación en muestras positivas
+            #pragma omp parallel for reduction(+:correct_positive)
+            for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+                const Eigen::VectorXf& input = val_positive_samples.getSample(i);
+                Eigen::VectorXf output;
+                layer.forward(input, output, false, true, threshold, activation, activation_derivative);
+
+                float goodness = output.squaredNorm();
+                #pragma omp critical
+                {
+                    goodness_positive_vals.push_back(goodness);
+                }
+
+                if (goodness > threshold) {
+                    ++correct_positive;
+                }
+            }
+
+            // Evaluación en muestras negativas
+            #pragma omp parallel for reduction(+:correct_negative)
+            for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+                const Eigen::VectorXf& input = val_negative_samples.getSample(i);
+                Eigen::VectorXf output;
+                layer.forward(input, output, false, false, threshold, activation, activation_derivative);
+
+                float goodness = output.squaredNorm();
+                #pragma omp critical
+                {
+                    goodness_negative_vals.push_back(goodness);
+                }
+
+                if (goodness < threshold) {
+                    ++correct_negative;
+                }
+            }
+
+            // Calcula la precisión
+            double accuracy = (static_cast<double>(correct_positive + correct_negative) /
+                              (val_positive_samples.getNumSamples() + val_negative_samples.getNumSamples())) * 100.0;
+
+            double accuracy_positive = (static_cast<double>(correct_positive) /
+                                       val_positive_samples.getNumSamples()) * 100.0;
+
+            double accuracy_negative = (static_cast<double>(correct_negative) /
+                                       val_negative_samples.getNumSamples()) * 100.0;
+
+            std::cout << "Precisión en validación: " << accuracy << "%\n"
+                      << "Precisión en positivos: " << accuracy_positive << "%\n"
+                      << "Precisión en negativos: " << accuracy_negative << "%\n";
+
+            // Verifica si esta es la mejor precisión hasta ahora
+            if (accuracy > best_score) {
+                best_score = accuracy;
+                epochs_without_improvement = 0;
+
+                // Guarda el mejor modelo
+                best_overall_layer = layer;
+                best_overall_threshold = threshold;
+
+                std::cout << "Nuevo mejor modelo general encontrado con precisión: " << best_score << "%\n";
+            } else {
+                epochs_without_improvement++;
+            }
+
+            // Revertir al mejor modelo si no hay mejora en 'patience' épocas
+            if (epochs_without_improvement >= patience) {
+                std::cout << "No hay mejora en las últimas " << patience << " épocas. Revirtiendo al mejor modelo general.\n";
+                layer = best_overall_layer;
+                threshold = best_overall_threshold;
+                epochs_without_improvement = 0; // Reinicia el contador
+            }
+
+            // Ajusta dinámicamente el umbral si está habilitado
+            if (dynamic_threshold) {
+                float avg_goodness_positive = std::accumulate(goodness_positive_vals.begin(),
+                                                              goodness_positive_vals.end(), 0.0f) / goodness_positive_vals.size();
+                float avg_goodness_negative = std::accumulate(goodness_negative_vals.begin(),
+                                                              goodness_negative_vals.end(), 0.0f) / goodness_negative_vals.size();
+
+                threshold = (avg_goodness_positive + avg_goodness_negative) / 2.0f;
+                std::cout << "Umbral ajustado a: " << threshold << "\n";
+            }
+
+            // Guardar los histogramas combinados de esta época con el nombre único
+            std::string hist_filename = "histograms/LongTraining_Epoch_" + std::to_string(epoch + 1) + ".png";
+
+            plotGoodnessHistogramsCombined(goodness_positive_vals,
+                                           goodness_negative_vals,
+                                           threshold,
+                                           hist_filename); // Pasar 'hist_filename' como ruta de guardado
+
+            std::cout << "Histograma combinado guardado en: " << hist_filename << "\n";
+        }
+
+        // Establecer la capa y umbral al mejor encontrado durante el entrenamiento largo
+        FullyConnectedLayer final_layer = best_overall_layer;
+        threshold = best_overall_threshold;
+        double final_best_score = best_score;
+
+        // Solicita al usuario la ruta para guardar el modelo final
         std::string model_path;
-        std::cout << "\nIngrese la ruta para guardar el mejor modelo (ej., best_model.bin): ";
+        std::cout << "\nIngrese la ruta para guardar el mejor modelo final (ej., best_model_final.bin): ";
         std::cin >> model_path;
-        layer.saveModel(model_path);
-        std::cout << "Mejor modelo guardado en: " << model_path << "\n";
+        final_layer.saveModel(model_path);
+        std::cout << "Mejor modelo final guardado en: " << model_path << "\n";
 
         // Construir el nombre de archivo para el histograma final
         std::string final_hist_filename = "histograms/Histograma_Combined_final.png";
@@ -696,12 +1003,13 @@ void trainModel() {
         int num_components;
         std::cout << "\nIngrese el número de componentes PCA (2 o 3): ";
         std::cin >> num_components;
-        visualizePCA(layer, val_positive_samples, val_negative_samples, num_components, threshold); // Pasar 'threshold'
+        visualizePCA(final_layer, val_positive_samples, val_negative_samples, num_components, threshold); // Pasar 'threshold'
 
     } catch (const std::exception& ex) {
         std::cerr << "Error durante el entrenamiento: " << ex.what() << "\n";
     }
 }
+
 
 // Función principal del programa
 int main() {
