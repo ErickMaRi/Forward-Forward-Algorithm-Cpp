@@ -871,4 +871,4 @@ Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos h
 
 ## TODO
 
-1. Mezclar los datos positivos y negativos en un solo batch para estabilizar el aprendizaje.
+1. Implementar cargado de modelos para resumir el entrenamiento de un modelo memorablemente bueno con el mismo conjunto de datos, o usar otro conjunto similar.
