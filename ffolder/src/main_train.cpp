@@ -92,10 +92,9 @@ std::shared_ptr<Optimizer> selectOptimizer() {
 // ================================
 // Funciones para Visualización
 // ================================
-
 void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
                   Dataset& val_negative_samples, int num_components,
-                  float threshold) { // Añadido 'threshold'
+                  float threshold) {
     // Verificar que num_components sea 2 o 3
     if (num_components != 2 && num_components != 3) {
         throw std::invalid_argument("El número de componentes debe ser 2 o 3.");
@@ -111,6 +110,7 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
     cv::Mat data(total_samples, output_size, CV_32F);
     std::vector<int> labels(total_samples);
     std::vector<std::string> image_paths(total_samples);
+    std::vector<float> squared_magnitudes(total_samples);
 
     // Define la función de activación y su derivada (Leaky ReLU)
     auto activation = [](float x) -> float {
@@ -121,13 +121,17 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
         return x > 0.0f ? 1.0f : 0.01f;
     };
 
+    // Vectores para las magnitudes al cuadrado de cada conjunto
+    std::vector<float> squared_magnitudes_positive;
+    std::vector<float> squared_magnitudes_negative;
+
     // Recopilar salidas para muestras positivas
     size_t idx = 0;
     for (size_t i = 0; i < val_positive_size; ++i, ++idx) {
         const Eigen::VectorXf& input = val_positive_samples.getSample(i);
         Eigen::VectorXf output;
-        layer.forward(input, output, false, true, threshold, // Usar 'threshold'
-                     activation, activation_derivative); // Activación identidad
+        layer.forward(input, output, false, true, threshold,
+                      activation, activation_derivative);
 
         // Copiar la salida a la matriz de datos
         for (size_t j = 0; j < output_size; ++j) {
@@ -135,14 +139,19 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
         }
         labels[idx] = 1; // Positivo
         image_paths[idx] = val_positive_samples.getImagePath(i);
+
+        // Calcular y almacenar la magnitud al cuadrado
+        float squared_magnitude = output.squaredNorm();
+        squared_magnitudes[idx] = squared_magnitude;
+        squared_magnitudes_positive.push_back(squared_magnitude);
     }
 
     // Recopilar salidas para muestras negativas
     for (size_t i = 0; i < val_negative_size; ++i, ++idx) {
         const Eigen::VectorXf& input = val_negative_samples.getSample(i);
         Eigen::VectorXf output;
-        layer.forward(input, output, false, false, threshold, // Usar 'threshold'
-                     activation, activation_derivative); // Activación identidad
+        layer.forward(input, output, false, false, threshold,
+                      activation, activation_derivative);
 
         // Copiar la salida a la matriz de datos
         for (size_t j = 0; j < output_size; ++j) {
@@ -150,6 +159,11 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
         }
         labels[idx] = 0; // Negativo
         image_paths[idx] = val_negative_samples.getImagePath(i);
+
+        // Calcular y almacenar la magnitud al cuadrado
+        float squared_magnitude = output.squaredNorm();
+        squared_magnitudes[idx] = squared_magnitude;
+        squared_magnitudes_negative.push_back(squared_magnitude);
     }
 
     // Realizar PCA
@@ -158,10 +172,17 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
     // Proyectar datos
     cv::Mat projected_data = pca.project(data);
 
-    // Encontrar mínimos y máximos para el escalado
+    // Encontrar mínimos y máximos para el escalado de las coordenadas PCA
     cv::Mat min_vals, max_vals;
     cv::reduce(projected_data, min_vals, 0, cv::REDUCE_MIN);
     cv::reduce(projected_data, max_vals, 0, cv::REDUCE_MAX);
+
+    // Encontrar mínimos y máximos de las magnitudes al cuadrado para cada conjunto
+    float min_squared_magnitude_positive = *std::min_element(squared_magnitudes_positive.begin(), squared_magnitudes_positive.end());
+    float max_squared_magnitude_positive = *std::max_element(squared_magnitudes_positive.begin(), squared_magnitudes_positive.end());
+
+    float min_squared_magnitude_negative = *std::min_element(squared_magnitudes_negative.begin(), squared_magnitudes_negative.end());
+    float max_squared_magnitude_negative = *std::max_element(squared_magnitudes_negative.begin(), squared_magnitudes_negative.end());
 
     // Crear imagen para el scatter plot
     int img_size = 600;
@@ -193,8 +214,34 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
         plot_data.points.push_back(pt);
         plot_data.image_paths.push_back(image_paths[i]);
 
-        cv::Scalar color = labels[i] == 1 ? cv::Scalar(255, 0, 0) :
-                                            cv::Scalar(0, 255, 0);
+        // Mapear la magnitud al cuadrado al rango [0, 255] para el canal verde
+        float normalized_value;
+        int green_value;
+        if (labels[i] == 1) {
+            // Muestras positivas
+            normalized_value = (squared_magnitudes[i] - min_squared_magnitude_positive) /
+                               (max_squared_magnitude_positive - min_squared_magnitude_positive);
+        } else {
+            // Muestras negativas
+            normalized_value = (squared_magnitudes[i] - min_squared_magnitude_negative) /
+                               (max_squared_magnitude_negative - min_squared_magnitude_negative);
+        }
+
+        // Asegurarse de que el valor esté entre 0 y 1
+        normalized_value = std::max(0.0f, std::min(1.0f, normalized_value));
+
+        green_value = static_cast<int>(normalized_value * 255.0f);
+
+        // Establecer color según la etiqueta y la magnitud
+        cv::Scalar color;
+        if (labels[i] == 1) {
+            // Rojo y canal verde para la magnitud
+            color = cv::Scalar(0, green_value, 255);
+        } else {
+            // Azul y canal verde para la magnitud
+            color = cv::Scalar(255, green_value, 0);
+        }
+
         cv::circle(plot_data.image, pt, 4, color, -1);
     }
 
@@ -247,6 +294,7 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
     cv::imshow("Scatter Plot", plot_data.image);
     cv::waitKey(0);
 }
+
 
 void plotGoodnessHistogramsCombined(const std::vector<float>& goodness_positive_vals,
                                     const std::vector<float>& goodness_negative_vals,
