@@ -991,8 +991,10 @@ Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos h
 
 1. Implementar cargado de modelos para resumir el entrenamiento de un modelo memorablemente bueno con el mismo conjunto de datos, o usar otro conjunto similar.
 
-2. Factorizar código de los últimos métodos. 
+2. Factorizar código de los últimos métodos.
 
-3. Implementar métodos para exportar a formato ONNX ( Open Neural Network Xchange ) para interoperar con otros stacks. [Closed issue afín](https://github.com/onnx/onnx/issues/418)
+3. Modificar la clase dataset para sostener la mínima cantidad de los datos en un momento dado (como el batch size es 1 dada la arquitectura podríamos entrenar con conjuntos de datos arbitrariamente grandes con el esquema correcto para manejar los datos. Actualmente se sostiene el dataset entero para entrenar, evaluar y visualizar). Con el anterior resuelto podríamos sintetizar los datos positivos y negativos mientras entrenamos indefinidamente.
 
-4. Implementar el aprendizaje para el ensamble, por ahora continúa aprendiendo con el promedio de los ntop modelos.
+4. Implementar métodos para exportar a formato ONNX ( Open Neural Network Xchange ) para interoperar con otros stacks. [Closed issue afín](https://github.com/onnx/onnx/issues/418)
+
+5. Implementar el aprendizaje para el ensamble, por ahora continúa aprendiendo con el promedio de los ntop modelos.
