@@ -991,8 +991,8 @@ Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos h
 
 1. Implementar cargado de modelos para resumir el entrenamiento de un modelo memorablemente bueno con el mismo conjunto de datos, o usar otro conjunto similar.
 
-2. Implementar el aprendizaje para el ensamble, por ahora continúa aprendiendo con el promedio de los ntop modelos.
+2. Factorizar código de los últimos métodos. 
 
-3. Actualizar la documentación.
+3. Implementar métodos para exportar a formato ONNX ( Open Neural Network Xchange ) para interoperar con otros stacks. [Closed issue afín](https://github.com/onnx/onnx/issues/418)
 
-4. Factorizar código de los últimos métodos.
+4. Implementar el aprendizaje para el ensamble, por ahora continúa aprendiendo con el promedio de los ntop modelos.
