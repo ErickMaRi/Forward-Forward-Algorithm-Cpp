@@ -997,4 +997,6 @@ Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos h
 
 4. Implementar métodos para exportar a formato ONNX ( Open Neural Network Xchange ) para interoperar con otros stacks. [Closed issue afín](https://github.com/onnx/onnx/issues/418)
 
-5. Implementar el aprendizaje para el ensamble, por ahora continúa aprendiendo con el promedio de los ntop modelos.
+5. Implementar un esquema que entrene la primera capa hasta satisfacer alguna condición y tras esta declara una nueva capa que entrena con las salidas normalizadas de la primera capa, el algoritmo también debe determinar cuando las activaciones concatenadas de `n_last` capas separan los datos negativos de los positivos de peor manera habiendo entrenado la capa más nueva (usando PCA y alguna heurística), para saber cuando detenerse. Posterior al crecimiento inicial el algoritmo podría distribuir recursos entre las capas para iras entrenando juntas o por separado, cuando esta estrategia no de frutos podríamos optar por entrenar más capas. Todo el proceso debe ser monitoreado por hiperparámetros que definan cotas máximas y heurísticas relacionadas a; la profundidad, las dimensiones de entrada y de salida por cada capa.
+
+6. Implementar el aprendizaje para el ensamble, por ahora continúa aprendiendo con el promedio de los ntop modelos.
