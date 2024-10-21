@@ -9,13 +9,13 @@ int main(int argc, char* argv[]) {
         std::string negative_directory = "data/negative_images";
         int num_positive_images = 10000;
         int num_negative_images = 10000;
-        cv::Size image_size(64, 64);
-        float min_frequency = 0.002f;
-        float max_frequency = 0.3f;
+        cv::Size image_size(32, 32);
+        float min_frequency = 0.05f;
+        float max_frequency = 0.4f;
         std::string bias_type = "none"; // Opciones: none, random_color_random_position, fixed_color_random_position, fixed_color_fixed_position
         int line_thickness = 2;
-        cv::Scalar fixed_color(0, 0, 255); // Color por defecto para el sesgo
-        cv::Point fixed_position(32, 32); // Posición por defecto para el sesgo fijo
+        cv::Scalar fixed_color(255, 255, 255); // Color por defecto para el sesgo
+        cv::Point fixed_position(0, 0); // Posición por defecto para el sesgo fijo
 
         if (argc < 2) {
             std::cerr << "Uso: " << argv[0] << " [all|positive|negative] [bias_type] [line_thickness]\n";

@@ -20,7 +20,7 @@ for batch_file in batch_files:
         
         # Reshape and save images
         for i in range(cantidad):  # Use len(images) instead of hardcoding 10000
-            img = images[i].reshape(3, 64, 64).transpose(1, 2, 0)  # Reshape to HWC format
+            img = images[i].reshape(3, 32, 32).transpose(1, 2, 0)  # Reshape to HWC format
             img = Image.fromarray(np.uint8(img))  # Convert to PIL Image
             
             # Use str.format() for compatibility with older Python versions

@@ -64,6 +64,7 @@ std::shared_ptr<Optimizer> selectOptimizer() {
     int optimizer_choice;
     std::cout << "\nSeleccione el optimizador:\n";
     std::cout << "1. Adam Optimizer\n";
+    std::cout << "2. Low Pass Filter Optimizer\n";
     std::cout << "Ingrese su elección: ";
     std::cin >> optimizer_choice;
 
@@ -83,6 +84,16 @@ std::shared_ptr<Optimizer> selectOptimizer() {
         std::cin >> epsilon;
 
         return std::make_shared<AdamOptimizer>(learning_rate, beta1, beta2, epsilon);
+    } else if (optimizer_choice == 2) {
+        float learning_rate, alpha;
+
+        std::cout << "Ingrese el learning rate para Low Pass Filter Optimizer: ";
+        std::cin >> learning_rate;
+
+        std::cout << "Ingrese el valor de alpha (ej. 0.1): ";
+        std::cin >> alpha;
+
+        return std::make_shared<LowPassFilterOptimizer>(learning_rate, alpha);
     } else {
         std::cout << "Opción inválida. Usando Adam Optimizer con valores por defecto.\n";
         return std::make_shared<AdamOptimizer>();

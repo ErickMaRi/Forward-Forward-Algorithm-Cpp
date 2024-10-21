@@ -32,7 +32,7 @@ public:
      * @param epsilon Término de estabilidad numérica.
      */
     AdamOptimizer(float learning_rate = 0.001f, float beta1 = 0.9f,
-                 float beta2 = 0.999f, float epsilon = 1e-8f);
+                  float beta2 = 0.999f, float epsilon = 1e-8f);
 
     void updateWeights(Eigen::MatrixXf& weights,
                        const Eigen::MatrixXf& gradients) override;
@@ -52,6 +52,34 @@ private:
     Eigen::MatrixXf v_weights;
     Eigen::VectorXf m_biases;
     Eigen::VectorXf v_biases;
+};
+
+/**
+ * @brief Implementación del optimizador Low Pass Filter.
+ */
+class LowPassFilterOptimizer : public Optimizer {
+public:
+    /**
+     * @brief Constructor con parámetros personalizables.
+     * @param learning_rate Tasa de aprendizaje.
+     * @param alpha Factor de suavizado para el filtro.
+     */
+    LowPassFilterOptimizer(float learning_rate = 0.01f, float alpha = 0.1f);
+
+    void updateWeights(Eigen::MatrixXf& weights,
+                       const Eigen::MatrixXf& gradients) override;
+
+    void updateBiases(Eigen::VectorXf& biases,
+                      const Eigen::VectorXf& gradients) override;
+
+private:
+    float lr;
+    float alpha;
+
+    Eigen::MatrixXf ema_weights;
+    Eigen::VectorXf ema_biases;
+    bool initialized_weights;
+    bool initialized_biases;
 };
 
 #endif // OPTIMIZER_HPP
