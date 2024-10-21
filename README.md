@@ -991,8 +991,16 @@ Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos h
 
 1. Implementar cargado de modelos para resumir el entrenamiento de un modelo memorablemente bueno con el mismo conjunto de datos, o usar otro conjunto similar.
 
-2. Implementar el aprendizaje para el ensamble, por ahora continúa aprendiendo con el promedio de los ntop modelos.
+2. Factorizar código de los últimos métodos.
 
-3. Actualizar la documentación.
+3. Modificar la clase dataset para sostener la mínima cantidad de los datos en un momento dado (como el batch size es 1 dada la arquitectura podríamos entrenar con conjuntos de datos arbitrariamente grandes con el esquema correcto para manejar los datos. Actualmente se sostiene el dataset entero para entrenar, evaluar y visualizar). Con el anterior resuelto podríamos sintetizar los datos positivos y negativos mientras entrenamos indefinidamente.
 
-4. Factorizar código de los últimos métodos.
+4. Implementar métodos para exportar a formato ONNX ( Open Neural Network Xchange ) para interoperar con otros stacks. [Closed issue afín](https://github.com/onnx/onnx/issues/418)
+
+5. Implementar un esquema que entrene la primera capa hasta satisfacer alguna condición y tras esta declara una nueva capa que entrena con las salidas normalizadas de la primera capa, el algoritmo también debe determinar cuando las activaciones concatenadas de `n_last` capas separan los datos negativos de los positivos de peor manera habiendo entrenado la capa más nueva (usando PCA y alguna heurística), para saber cuando detenerse. Posterior al crecimiento inicial el algoritmo podría distribuir recursos entre las capas para iras entrenando juntas o por separado, cuando esta estrategia no de frutos podríamos optar por entrenar más capas. Todo el proceso debe ser monitoreado por hiperparámetros que definan cotas máximas y heurísticas relacionadas a; la profundidad, las dimensiones de entrada y de salida por cada capa.
+
+6. Implementar el procesado de dátos de audio con espectrogramas monocromáticos o bicromáticos (para espectrogramas con fase) sintetizando datos positivos (o solo negativos) con ruido creíble para grabaciones de audio.
+
+7. Implementar un método para realizar el entrenamiento múltiples veces, que guarde en un caché las semillas usadas, los resultados, fecha, hora y sirva para reproducir los resultados en distintos dispositivos produciendo distribuciones de resultados para poder evaluar las salidas con significancia estadística.
+
+8. Implementar el aprendizaje para el ensamble, por ahora continúa aprendiendo con el promedio de los ntop modelos.
