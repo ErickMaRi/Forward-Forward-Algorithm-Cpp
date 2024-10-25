@@ -1,15 +1,10 @@
 #include "neural_network.hpp"
 
-#include <opencv2/opencv.hpp>
-#include <iostream>
+#include <Eigen/Dense>
 #include <random>
-#include <filesystem>
-#include <vector>
-#include <algorithm>
 #include <fstream>
 #include <stdexcept>
-
-namespace fs = std::filesystem;
+#include <opencv2/opencv.hpp>
 
 // Implementación de la clase Dataset
 
@@ -25,43 +20,49 @@ void Dataset::loadImages(const std::string& directory_path) {
         throw std::runtime_error("No se encontraron imágenes en el directorio: " + directory_path);
     }
 
+    // Preasigna espacio para evitar realocaciones
+    samples.reserve(image_files.size());
+    image_paths.reserve(image_files.size());
+
     for (const auto& file : image_files) {
-        cv::Mat img = cv::imread(file, cv::IMREAD_COLOR);
+        cv::Mat img = cv::imread(file, cv::IMREAD_UNCHANGED);
         if (img.empty()) {
             throw std::runtime_error("Error al leer la imagen: " + file);
         }
 
-        if (image_height == 0 && image_width == 0) {
+        // Determinar el número de canales
+        if (samples.empty()) {
             image_height = img.rows;
             image_width = img.cols;
-        } else if (img.rows != image_height || img.cols != image_width) {
-            throw std::runtime_error("Las imágenes deben tener el mismo tamaño.");
+            num_channels = img.channels();
+            input_size = image_height * image_width * num_channels;
+        } else {
+            if (static_cast<size_t>(img.rows) != image_height || static_cast<size_t>(img.cols) != image_width) {
+                throw std::runtime_error("Las imágenes deben tener el mismo tamaño.");
+            }
+            if (static_cast<size_t>(img.channels()) != num_channels) {
+                throw std::runtime_error("Todas las imágenes deben tener el mismo número de canales.");
+            }
         }
 
         img.convertTo(img, CV_32F, 1.0 / 255.0);
 
-        Eigen::VectorXf sample(img.rows * img.cols * img.channels());
-        int idx = 0;
-        for (int i = 0; i < img.rows; ++i) {
-            for (int j = 0; j < img.cols; ++j) {
-                cv::Vec3f pixel = img.at<cv::Vec3f>(i, j);
-                for (int c = 0; c < img.channels(); ++c) {
-                    sample(idx++) = pixel[c];
-                }
-            }
+        // Asegurarse de que la matriz esté en un formato continuo
+        if (!img.isContinuous()) {
+            img = img.clone();
         }
 
-        if (samples.empty()) {
-            input_size = sample.size();
-        } else if (sample.size() != input_size) {
-            throw std::runtime_error("Tamaños de muestra inconsistentes en el conjunto de datos.");
-        }
+        // Mapear directamente los datos de la imagen a un vector de Eigen
+        Eigen::Map<Eigen::VectorXf> sample_map(reinterpret_cast<float*>(img.data),
+                                              img.rows * img.cols * img.channels());
 
-        samples.push_back(std::move(sample));
-        image_paths.push_back(file);
+        // Crear una copia del mapeo para almacenar en el vector de muestras
+        Eigen::VectorXf sample = sample_map;
+
+        samples.emplace_back(std::move(sample));
+        image_paths.emplace_back(file);
     }
 
-    num_channels = 3;
     std::cout << "Cargadas " << samples.size() << " muestras de " << directory_path << "\n";
 }
 
@@ -87,18 +88,14 @@ const std::string& Dataset::getImagePath(size_t index) const {
 void Dataset::shuffle() {
     std::random_device rd;
     std::mt19937 g(rd());
-    std::vector<size_t> indices(samples.size());
-    std::iota(indices.begin(), indices.end(), 0);
-    std::shuffle(indices.begin(), indices.end(), g);
 
-    std::vector<Eigen::VectorXf> shuffled_samples(samples.size());
-    std::vector<std::string> shuffled_image_paths(samples.size());
-    for (size_t i = 0; i < samples.size(); ++i) {
-        shuffled_samples[i] = samples[indices[i]];
-        shuffled_image_paths[i] = image_paths[indices[i]];
+    // Shuffling in-place usando el algoritmo Fisher-Yates
+    for (size_t i = samples.size() - 1; i > 0; --i) {
+        std::uniform_int_distribution<size_t> dist(0, i);
+        size_t j = dist(g);
+        std::swap(samples[i], samples[j]);
+        std::swap(image_paths[i], image_paths[j]);
     }
-    samples = std::move(shuffled_samples);
-    image_paths = std::move(shuffled_image_paths);
 }
 
 void Dataset::addSample(const Eigen::VectorXf& sample, const std::string& image_path) {
@@ -107,8 +104,8 @@ void Dataset::addSample(const Eigen::VectorXf& sample, const std::string& image_
     } else if (sample.size() != input_size) {
         throw std::runtime_error("Tamaños de muestra inconsistentes en el conjunto de datos.");
     }
-    samples.push_back(sample);
-    image_paths.push_back(image_path);
+    samples.emplace_back(sample);
+    image_paths.emplace_back(image_path);
 }
 
 void Dataset::setImageProperties(size_t height, size_t width, size_t channels) {
@@ -140,15 +137,16 @@ FullyConnectedLayer::FullyConnectedLayer(size_t input_size, size_t output_size,
       pre_activations(output_size) {
     std::random_device rd;
     std::mt19937 gen(rd());
-    // Se inicializa con una distribución de He 
+    // Inicialización con distribución de He (He et al.)
     float std_dev = std::sqrt(2.0f / input_size);
     std::normal_distribution<float> weight_dist(0.0f, std_dev);
 
-    for (size_t i = 0; i < weights.size(); ++i) {
-        weights(i) = weight_dist(gen);
+    // Asignar pesos utilizando Eigen's generar aleatorio
+    for (int i = 0; i < weights.size(); ++i) {
+        weights.data()[i] = weight_dist(gen);
     }
 
-    biases = Eigen::VectorXf::Constant(output_size, 0.01f);
+    biases.setConstant(0.01f);
 }
 
 void FullyConnectedLayer::forward(const Eigen::VectorXf& inputs,
@@ -159,7 +157,11 @@ void FullyConnectedLayer::forward(const Eigen::VectorXf& inputs,
         throw std::invalid_argument("El tamaño de entrada no coincide con input_size.");
     }
 
-    pre_activations.noalias() = weights * inputs + biases;
+    // Calcula preactivaciones: weights * inputs + biases
+    pre_activations.noalias() = weights * inputs;
+    pre_activations += biases;
+
+    // Aplica la función de activación
     outputs = pre_activations.unaryExpr(activation);
 
     if (learn) {
@@ -174,15 +176,20 @@ void FullyConnectedLayer::updateWeights(const Eigen::VectorXf& inputs,
     float p = 1.0f / (1.0f + std::exp(-(goodness - threshold)));
     float y = is_positive ? 1.0f : 0.0f;
 
-    // Corrección: La derivada correcta es (p - y)
-    float dL_dG = (p - y);
+    // dL_dG = p - y
+    float dL_dG = p - y;
 
-    Eigen::VectorXf dG_da = 2.0f * outputs; // Derivada de la bondad respecto a las activaciones
+    // dG_da = 2 * outputs
+    Eigen::VectorXf dG_da = 2.0f * outputs;
 
-    Eigen::VectorXf dL_da = dL_dG * dG_da; // Aplicando la regla de la cadena
+    // dL_da = dL_dG * dG_da
+    Eigen::VectorXf dL_da = dL_dG * dG_da;
 
     // Derivada de la función de activación (Leaky ReLU)
-    Eigen::VectorXf dL_dz = dL_da.array() * pre_activations.unaryExpr(activation_derivative).array();
+    Eigen::VectorXf activation_derivatives = pre_activations.unaryExpr(activation_derivative);
+
+    // dL_dz = dL_da * activation_derivatives
+    Eigen::VectorXf dL_dz = dL_da.array() * activation_derivatives.array();
 
     // Gradientes respecto a los pesos y biases
     Eigen::MatrixXf grad_weights = dL_dz * inputs.transpose();

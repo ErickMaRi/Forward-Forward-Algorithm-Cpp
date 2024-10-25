@@ -6,7 +6,7 @@ from PIL import Image
 # Define paths
 batch_files = ['train_data_batch_1']
 output_folder = 'output_images'
-cantidad = 10000
+cantidad = 1000
 # Create output directory if it doesn't exist
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)

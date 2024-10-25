@@ -3,7 +3,7 @@
 #include "neural_network.hpp"
 #include "optimizer.hpp"
 #include "scatter_plot_data.hpp"
-
+#include <Eigen/Dense>
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <random>
@@ -22,15 +22,51 @@ namespace fs = std::filesystem;
 // Funciones Auxiliares y Principal
 // ================================
 
+
+
 /**
- * @brief Divide el conjunto de datos en entrenamiento y validación.
+ * @brief Genera una permutación fija para los datos de entrada.
+ * @param input_size Tamaño del vector de entrada.
+ * @return Vector que representa la permutación.
+ */
+std::vector<size_t> generateFixedPermutation(size_t input_size) {
+    std::vector<size_t> permutation(input_size);
+    std::iota(permutation.begin(), permutation.end(), 0); // Inicializa con 0, 1, 2, ..., input_size-1
+
+    // Utiliza un generador con semilla fija para reproducibilidad
+    std::mt19937 rng(42); // Semilla fija
+    std::shuffle(permutation.begin(), permutation.end(), rng);
+
+    return permutation;
+}
+
+
+/**
+ * @brief Aplica una permutación fija a una imagen.
+ * @param image Vector de entrada que representa la imagen.
+ * @param permutation Vector que define la permutación de los índices.
+ * @return Vector permutado.
+ */
+Eigen::VectorXf applyPermutation(const Eigen::VectorXf& image, const std::vector<size_t>& permutation) {
+    Eigen::VectorXf permuted_image(image.size());
+    for (size_t i = 0; i < permutation.size(); ++i) {
+        permuted_image[i] = image[permutation[i]];
+    }
+    return permuted_image;
+}
+
+
+/**
+ * @brief Divide el conjunto de datos en entrenamiento y validación, aplicando una permutación fija.
  * @param dataset Conjunto de datos completo.
  * @param train_fraction Fracción de datos para entrenamiento.
  * @param train_set Referencia al conjunto de entrenamiento.
  * @param val_set Referencia al conjunto de validación.
+ * @param permutation Vector de permutación a aplicar.
  */
 void splitDataset(const Dataset& dataset, float train_fraction,
-                  Dataset& train_set, Dataset& val_set) {
+                 Dataset& train_set, Dataset& val_set,
+                 const std::vector<size_t>& permutation) {
     size_t total_samples = dataset.getNumSamples();
     size_t train_samples = static_cast<size_t>(total_samples * train_fraction);
 
@@ -39,12 +75,12 @@ void splitDataset(const Dataset& dataset, float train_fraction,
     std::shuffle(indices.begin(), indices.end(), std::mt19937{ std::random_device{}() });
 
     for (size_t i = 0; i < train_samples; ++i) {
-        train_set.addSample(dataset.getSample(indices[i]),
-                            dataset.getImagePath(indices[i]));
+        Eigen::VectorXf permuted_sample = applyPermutation(dataset.getSample(indices[i]), permutation);
+        train_set.addSample(permuted_sample, dataset.getImagePath(indices[i]));
     }
     for (size_t i = train_samples; i < total_samples; ++i) {
-        val_set.addSample(dataset.getSample(indices[i]),
-                          dataset.getImagePath(indices[i]));
+        Eigen::VectorXf permuted_sample = applyPermutation(dataset.getSample(indices[i]), permutation);
+        val_set.addSample(permuted_sample, dataset.getImagePath(indices[i]));
     }
 
     // Copia las propiedades de imagen
@@ -55,6 +91,7 @@ void splitDataset(const Dataset& dataset, float train_fraction,
                                dataset.getImageWidth(),
                                dataset.getNumChannels());
 }
+
 
 /**
  * @brief Permite al usuario seleccionar un optimizador.
@@ -667,14 +704,18 @@ void trainModel() {
             throw std::runtime_error("Conjuntos de datos positivos o negativos están vacíos.");
         }
 
+        // Generar una permutación fija basada en el tamaño de entrada
+        size_t input_size = positive_samples.getInputSize(); // Asegúrate de que esto corresponde al tamaño de cada imagen
+        std::vector<size_t> permutation = generateFixedPermutation(input_size);
+
         Dataset train_positive_samples, val_positive_samples;
         Dataset train_negative_samples, val_negative_samples;
 
-        // Divide los conjuntos de datos en entrenamiento (80%) y validación (20%)
+        // Divide los conjuntos de datos en entrenamiento (80%) y validación (20%) aplicando la permutación
         splitDataset(positive_samples, 0.8f, train_positive_samples,
-                     val_positive_samples);
+                     val_positive_samples, permutation);
         splitDataset(negative_samples, 0.8f, train_negative_samples,
-                     val_negative_samples);
+                     val_negative_samples, permutation);
 
         // Selecciona el optimizador
         std::shared_ptr<Optimizer> optimizer = selectOptimizer();
@@ -713,7 +754,7 @@ void trainModel() {
         std::vector<float> goodness_negative_vals;
 
         // Solicita al usuario el tamaño de la capa completamente conectada
-        size_t input_size = train_positive_samples.getInputSize();
+        // size_t input_size = train_positive_samples.getInputSize(); // Esta línea se eliminó
         size_t output_size;
         std::cout << "Ingrese el tamaño de la capa (número de neuronas): ";
         std::cin >> output_size;
@@ -1084,7 +1125,7 @@ void trainModel() {
             best_overall_threshold = threshold;
         } else if (max_accuracy == accuracy_ensemble_vote) {
             std::cout << "\nEl ensemble mediante votación tiene la mejor precisión.\n";
-            // No podemos entrenar directamente un ensemble, así que usaremos el modelo promedio // TODO
+            // No podemos entrenar directamente un ensemble, así que usaremos el modelo promedio
             layer = averaged_model;
             best_overall_threshold = threshold;
         } else {
