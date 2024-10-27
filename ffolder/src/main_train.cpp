@@ -100,42 +100,118 @@ void splitDataset(const Dataset& dataset, float train_fraction,
 std::shared_ptr<Optimizer> selectOptimizer() {
     int optimizer_choice;
     std::cout << "\nSeleccione el optimizador:\n";
-    std::cout << "1. Adam Optimizer\n";
-    std::cout << "2. Low Pass Filter Optimizer\n";
+    std::cout << "1. SGD Optimizer\n";
+    std::cout << "2. Adam Optimizer\n";
+    std::cout << "3. RMSProp Optimizer\n";
+    std::cout << "4. Adagrad Optimizer\n";
+    std::cout << "5. Adadelta Optimizer\n";
+    std::cout << "6. AdamW Optimizer\n";
+    std::cout << "7. Low Pass Filter Optimizer\n";
     std::cout << "Ingrese su elección: ";
     std::cin >> optimizer_choice;
 
-    if (optimizer_choice == 1) {
-        float learning_rate, beta1, beta2, epsilon;
+    switch (optimizer_choice) {
+        case 1: {
+            float learning_rate, momentum;
 
-        std::cout << "Ingrese el learning rate para Adam Optimizer: ";
-        std::cin >> learning_rate;
+            std::cout << "Ingrese el learning rate para SGD Optimizer (ej. 0.0001): ";
+            std::cin >> learning_rate;
 
-        std::cout << "Ingrese el valor de beta1 (ej. 0.9): ";
-        std::cin >> beta1;
+            std::cout << "Ingrese el valor de momentum (ej. 0 para sin momentum): ";
+            std::cin >> momentum;
 
-        std::cout << "Ingrese el valor de beta2 (ej. 0.999): ";
-        std::cin >> beta2;
+            return std::make_shared<SGDOptimizer>(learning_rate, momentum);
+        }
+        case 2: {
+            float learning_rate, beta1, beta2, epsilon;
 
-        std::cout << "Ingrese el valor de epsilon (ej. 1e-8): ";
-        std::cin >> epsilon;
+            std::cout << "Ingrese el learning rate para Adam Optimizer (ej. 0.00001): ";
+            std::cin >> learning_rate;
 
-        return std::make_shared<AdamOptimizer>(learning_rate, beta1, beta2, epsilon);
-    } else if (optimizer_choice == 2) {
-        float learning_rate, alpha;
+            std::cout << "Ingrese el valor de beta1 (ej. 0.9): ";
+            std::cin >> beta1;
 
-        std::cout << "Ingrese el learning rate para Low Pass Filter Optimizer: ";
-        std::cin >> learning_rate;
+            std::cout << "Ingrese el valor de beta2 (ej. 0.999): ";
+            std::cin >> beta2;
 
-        std::cout << "Ingrese el valor de alpha (ej. 0.1): ";
-        std::cin >> alpha;
+            std::cout << "Ingrese el valor de epsilon (ej. 1e-8): ";
+            std::cin >> epsilon;
 
-        return std::make_shared<LowPassFilterOptimizer>(learning_rate, alpha);
-    } else {
-        std::cout << "Opción inválida. Usando Adam Optimizer con valores por defecto.\n";
-        return std::make_shared<AdamOptimizer>();
+            return std::make_shared<AdamOptimizer>(learning_rate, beta1, beta2, epsilon);
+        }
+        case 3: {
+            float learning_rate, beta, epsilon;
+
+            std::cout << "Ingrese el learning rate para RMSProp Optimizer (ej. 0.00001): ";
+            std::cin >> learning_rate;
+
+            std::cout << "Ingrese el valor de beta (ej. 0.9): ";
+            std::cin >> beta;
+
+            std::cout << "Ingrese el valor de epsilon (ej. 1e-8): ";
+            std::cin >> epsilon;
+
+            return std::make_shared<RMSPropOptimizer>(learning_rate, beta, epsilon);
+        }
+        case 4: {
+            float learning_rate, epsilon;
+
+            std::cout << "Ingrese el learning rate para Adagrad Optimizer (ej. 0.0001): ";
+            std::cin >> learning_rate;
+
+            std::cout << "Ingrese el valor de epsilon (ej. 1e-8): ";
+            std::cin >> epsilon;
+
+            return std::make_shared<AdagradOptimizer>(learning_rate, epsilon);
+        }
+        case 5: {
+            float rho, epsilon;
+
+            std::cout << "Ingrese el valor de rho para Adadelta Optimizer (ej. 0.95): ";
+            std::cin >> rho;
+
+            std::cout << "Ingrese el valor de epsilon (ej. 1e-6): ";
+            std::cin >> epsilon;
+
+            return std::make_shared<AdadeltaOptimizer>(rho, epsilon);
+        }
+        case 6: {
+            float learning_rate, beta1, beta2, epsilon, weight_decay;
+
+            std::cout << "Ingrese el learning rate para AdamW Optimizer (ej. 0.00001): ";
+            std::cin >> learning_rate;
+
+            std::cout << "Ingrese el valor de beta1 (ej. 0.9): ";
+            std::cin >> beta1;
+
+            std::cout << "Ingrese el valor de beta2 (ej. 0.999): ";
+            std::cin >> beta2;
+
+            std::cout << "Ingrese el valor de epsilon (ej. 1e-8): ";
+            std::cin >> epsilon;
+
+            std::cout << "Ingrese el valor de weight decay (ej. 0.0001): ";
+            std::cin >> weight_decay;
+
+            return std::make_shared<AdamWOptimizer>(learning_rate, beta1, beta2, epsilon, weight_decay);
+        }
+        case 7: {
+            float learning_rate, alpha;
+
+            std::cout << "Ingrese el learning rate para Low Pass Filter Optimizer (ej. 0.0001): ";
+            std::cin >> learning_rate;
+
+            std::cout << "Ingrese el valor de alpha (ej. 0.1): ";
+            std::cin >> alpha;
+
+            return std::make_shared<LowPassFilterOptimizer>(learning_rate, alpha);
+        }
+        default:
+            std::cout << "Opción inválida. Usando Adam Optimizer con valores por defecto.\n";
+            return std::make_shared<AdamOptimizer>();
     }
 }
+
 
 // ================================
 // Funciones para Visualización
