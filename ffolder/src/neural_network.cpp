@@ -176,19 +176,23 @@ void FullyConnectedLayer::updateWeights(const Eigen::VectorXf& inputs,
     float p = 1.0f / (1.0f + std::exp(-(goodness - threshold)));
     float y = is_positive ? 1.0f : 0.0f;
 
-    // dL_dG = p - y
+    // Cálculo de dL/dp sin simplificar
+    // float dL_dp = - ( (y / p) - ((1.0f - y) / (1.0f - p)) );
+    // dL_dp multiplicado por dp_dG (p(1-p)) da como resultado p - y
+
+    // Simplificamos el cálculo, evitamos inestabilidad para p cercano a cero.
     float dL_dG = p - y;
 
-    // dG_da = 2 * outputs
+    // Cálculo de dG/da
     Eigen::VectorXf dG_da = 2.0f * outputs;
 
-    // dL_da = dL_dG * dG_da
+    // Cálculo de dL/da
     Eigen::VectorXf dL_da = dL_dG * dG_da;
 
     // Derivada de la función de activación (Leaky ReLU)
     Eigen::VectorXf activation_derivatives = pre_activations.unaryExpr(activation_derivative);
 
-    // dL_dz = dL_da * activation_derivatives
+    // Cálculo de dL/dz
     Eigen::VectorXf dL_dz = dL_da.array() * activation_derivatives.array();
 
     // Gradientes respecto a los pesos y biases
