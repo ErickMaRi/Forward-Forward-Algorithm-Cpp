@@ -22,7 +22,16 @@ namespace fs = std::filesystem;
 // Funciones Auxiliares y Principal
 // ================================
 
+// Definir la función de activación y su derivada (Leaky ReLU) correctamente
+std::function<float(float)> activation = [](float x) -> float {
+    const float alpha = 1.0f / 64.0f; // 2^-6
+    return (x >= 0.0f) ? x : alpha * x; // Leaky ReLU
+};
 
+std::function<float(float)> activation_derivative = [](float x) -> float {
+    const float alpha = 1.0f / 64.0f; // 2^-6
+    return (x >= 0.0f) ? 1.0f : alpha; // Derivada de Leaky ReLU
+};
 
 /**
  * @brief Genera una permutación fija para los datos de entrada.
@@ -40,7 +49,6 @@ std::vector<size_t> generateFixedPermutation(size_t input_size) {
     return permutation;
 }
 
-
 /**
  * @brief Aplica una permutación fija a una imagen.
  * @param image Vector de entrada que representa la imagen.
@@ -54,7 +62,6 @@ Eigen::VectorXf applyPermutation(const Eigen::VectorXf& image, const std::vector
     }
     return permuted_image;
 }
-
 
 /**
  * @brief Divide el conjunto de datos en entrenamiento y validación, aplicando una permutación fija.
@@ -91,7 +98,6 @@ void splitDataset(const Dataset& dataset, float train_fraction,
                                dataset.getImageWidth(),
                                dataset.getNumChannels());
 }
-
 
 /**
  * @brief Permite al usuario seleccionar un optimizador.
@@ -212,7 +218,6 @@ std::shared_ptr<Optimizer> selectOptimizer() {
     }
 }
 
-
 // ================================
 // Funciones para Visualización
 // ================================
@@ -235,15 +240,6 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
     std::vector<int> labels(total_samples);
     std::vector<std::string> image_paths(total_samples);
     std::vector<float> squared_magnitudes(total_samples);
-
-    // Define la función de activación y su derivada (Leaky ReLU)
-    auto activation = [](float x) -> float {
-        return x > 0.0f ? x : 0.01f * x; // Leaky ReLU
-    };
-
-    auto activation_derivative = [](float x) -> float {
-        return x > 0.0f ? 1.0f : 0.01f;
-    };
 
     // Vectores para las magnitudes al cuadrado de cada conjunto
     std::vector<float> squared_magnitudes_positive;
@@ -419,7 +415,6 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
     cv::waitKey(0);
 }
 
-
 void plotGoodnessHistogramsCombined(const std::vector<float>& goodness_positive_vals,
                                     const std::vector<float>& goodness_negative_vals,
                                     float threshold,
@@ -591,180 +586,6 @@ void plotGoodnessHistograms(const std::vector<float>& goodness_positive_vals,
     cv::imwrite(pos_hist_path, histImagePositive);
     cv::imwrite(neg_hist_path, histImageNegative);
 }
-/* Sirve para a futuro construir un método que controle el aprendizaje de varias capas
-por ahora comentado
-// ================================
-// Funciones de Entrenamiento y Evaluación
-// ================================
-// Función de entrenamiento y evaluación modificada para barajar las muestras positivas y negativas
-void trainAndEvaluate(Dataset& train_positive_samples,
-                      Dataset& train_negative_samples,
-                      Dataset& val_positive_samples,
-                      Dataset& val_negative_samples,
-                      FullyConnectedLayer& layer, float& threshold,
-                      size_t epochs,
-                      const std::function<float(float)>& activation,
-                      const std::function<float(float)>& activation_derivative,
-                      bool verbose,
-                      double& best_score,
-                      bool dynamic_threshold,
-                      std::vector<float>& goodness_positive_vals,
-                      std::vector<float>& goodness_negative_vals,
-                      size_t patience, // Número de épocas para esperar antes de revertir
-                      FullyConnectedLayer& best_layer, // Capa para almacenar el mejor modelo
-                      float& best_threshold) {
-    size_t train_positive_size = train_positive_samples.getNumSamples();
-    size_t train_negative_size = train_negative_samples.getNumSamples();
-    size_t val_positive_size = val_positive_samples.getNumSamples();
-    size_t val_negative_size = val_negative_samples.getNumSamples();
-
-    size_t epochs_without_improvement = 0; // Contador de épocas sin mejora
-
-    for (size_t epoch = 0; epoch < epochs; ++epoch) {
-        if (verbose) {
-            std::cout << "\n--- Época " << (epoch + 1) << "/" << epochs << " ---\n";
-        }
-
-        // Crear una lista combinada de todas las muestras con sus etiquetas
-        // Usar std::reference_wrapper para almacenar referencias
-        std::vector<std::pair<std::reference_wrapper<const Eigen::VectorXf>, bool>> combined_train_samples;
-        combined_train_samples.reserve(train_positive_size + train_negative_size);
-
-        for (size_t i = 0; i < train_positive_size; ++i) {
-            combined_train_samples.emplace_back(train_positive_samples.getSample(i), true); // Positivo
-        }
-        for (size_t i = 0; i < train_negative_size; ++i) {
-            combined_train_samples.emplace_back(train_negative_samples.getSample(i), false); // Negativo
-        }
-
-        // Barajar la lista combinada
-        std::random_device rd;
-        std::mt19937 g(rd());
-        std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
-
-        // Entrenamiento en la lista combinada barajada
-        #pragma omp parallel for schedule(static)
-        for (size_t i = 0; i < combined_train_samples.size(); ++i) {
-            const Eigen::VectorXf& input = combined_train_samples[i].first.get();
-            bool is_positive = combined_train_samples[i].second;
-            Eigen::VectorXf output; // Variable para almacenar la salida
-            layer.forward(input, output, true, is_positive, threshold, activation, activation_derivative);
-        }
-
-        // Evaluación en conjunto de validación
-        size_t correct_positive = 0;
-        size_t correct_negative = 0;
-
-        goodness_positive_vals.clear();
-        goodness_negative_vals.clear();
-
-        // Evaluación en muestras positivas
-        #pragma omp parallel for reduction(+:correct_positive)
-        for (size_t i = 0; i < val_positive_size; ++i) {
-            const Eigen::VectorXf& input = val_positive_samples.getSample(i);
-            Eigen::VectorXf output;
-            layer.forward(input, output, false, true, threshold, activation, activation_derivative);
-
-            float goodness = output.squaredNorm();
-            #pragma omp critical
-            {
-                goodness_positive_vals.push_back(goodness);
-            }
-
-            if (goodness > threshold) {
-                ++correct_positive;
-            }
-        }
-
-        // Evaluación en muestras negativas
-        #pragma omp parallel for reduction(+:correct_negative)
-        for (size_t i = 0; i < val_negative_size; ++i) {
-            const Eigen::VectorXf& input = val_negative_samples.getSample(i);
-            Eigen::VectorXf output;
-            layer.forward(input, output, false, false, threshold, activation, activation_derivative);
-
-            float goodness = output.squaredNorm();
-            #pragma omp critical
-            {
-                goodness_negative_vals.push_back(goodness);
-            }
-
-            if (goodness < threshold) {
-                ++correct_negative;
-            }
-        }
-
-        // Calcula la precisión
-        double accuracy = (static_cast<double>(correct_positive + correct_negative) /
-                          (val_positive_size + val_negative_size)) * 100.0;
-
-        double accuracyn = (static_cast<double>(correct_negative) /
-                          (val_negative_size)) * 100.0;
-
-        double accuracyp = (static_cast<double>(correct_positive) /
-                          (val_positive_size)) * 100.0;
-
-        if (verbose) {
-            std::cout << "Precisión en validación: " << accuracy << "%\n"
-                      << "En los positivos: " << accuracyp << "%\n"
-                      << "En los negativos: " << accuracyn << "%\n";
-        }
-
-        // Verifica si esta es la mejor precisión hasta ahora
-        if (accuracy > best_score) {
-            best_score = accuracy;
-            epochs_without_improvement = 0;
-
-            // Guarda el mejor modelo
-            best_layer = layer; // Asumiendo que la clase FullyConnectedLayer tiene un operador de asignación
-            best_threshold = threshold;
-        } else {
-            epochs_without_improvement++;
-        }
-
-        // Revertir al mejor modelo si no hay mejora en 'patience' épocas
-        if (epochs_without_improvement >= patience) {
-            if (verbose) {
-                std::cout << "No hay mejora en las últimas " << patience << " épocas. Revirtiendo al mejor modelo.\n";
-            }
-            layer = best_layer;
-            threshold = best_threshold;
-            epochs_without_improvement = 0; // Reinicia el contador
-        }
-
-        // Ajusta dinámicamente el umbral si está habilitado
-        if (dynamic_threshold) {
-            float avg_goodness_positive = std::accumulate(goodness_positive_vals.begin(),
-                                                          goodness_positive_vals.end(), 0.0f) / val_positive_size;
-            float avg_goodness_negative = std::accumulate(goodness_negative_vals.begin(),
-                                                          goodness_negative_vals.end(), 0.0f) / val_negative_size;
-
-            threshold = (avg_goodness_positive + avg_goodness_negative) / 2.0f;
-            if (verbose) {
-                std::cout << "Umbral ajustado a: " << threshold << "\n";
-            }
-        }
-
-        // Guardar los histogramas combinados de esta época con el nombre único
-        std::string hist_filename;
-        if (epoch < 9) {
-            hist_filename = "histograms/Histograma_Combined_epoch_0" + std::to_string(epoch + 1) + ".png";
-        } else {
-            hist_filename = "histograms/Histograma_Combined_epoch_" + std::to_string(epoch + 1) + ".png";
-        }
-
-        plotGoodnessHistogramsCombined(goodness_positive_vals,
-                                       goodness_negative_vals,
-                                       threshold,
-                                       hist_filename); // Pasar 'hist_filename' como ruta de guardado
-
-        if (verbose) {
-            std::cout << "Histograma combinado guardado en: " << hist_filename << "\n";
-        }
-    }
-}
-*/
-
 
 /**
  * @brief Función principal que maneja el flujo de entrenamiento del modelo.
@@ -816,21 +637,11 @@ void trainModel() {
         std::cout << "Ingrese el número total de épocas de entrenamiento largo: ";
         std::cin >> total_epochs_long;
 
-        // Define la función de activación y su derivada (Leaky ReLU)
-        auto activation = [](float x) -> float {
-            return x > 0.0f ? x : 0.01f * x; // Leaky ReLU
-        };
-
-        auto activation_derivative = [](float x) -> float {
-            return x > 0.0f ? 1.0f : 0.01f;
-        };
-
         // Vectores para almacenar las bondades durante la evaluación
         std::vector<float> goodness_positive_vals;
         std::vector<float> goodness_negative_vals;
 
         // Solicita al usuario el tamaño de la capa completamente conectada
-        // size_t input_size = train_positive_samples.getInputSize(); // Esta línea se eliminó
         size_t output_size;
         std::cout << "Ingrese el tamaño de la capa (número de neuronas): ";
         std::cin >> output_size;
@@ -897,8 +708,7 @@ void trainModel() {
                 std::mt19937 g(rd());
                 std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
 
-                // Entrenamiento en la lista combinada barajada
-                #pragma omp parallel for schedule(static)
+                // Entrenamiento en la lista combinada barajada (sin OpenMP)
                 for (size_t i = 0; i < combined_train_samples.size(); ++i) {
                     const Eigen::VectorXf& input = combined_train_samples[i].first.get();
                     bool is_positive = combined_train_samples[i].second;
@@ -913,36 +723,28 @@ void trainModel() {
                 goodness_positive_vals.clear();
                 goodness_negative_vals.clear();
 
-                // Evaluación en muestras positivas
-                #pragma omp parallel for reduction(+:correct_positive)
+                // Evaluación en muestras positivas (sin OpenMP)
                 for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
                     const Eigen::VectorXf& input = val_positive_samples.getSample(i);
                     Eigen::VectorXf output;
                     current_layer.forward(input, output, false, true, threshold, activation, activation_derivative);
 
                     float goodness = output.squaredNorm();
-                    #pragma omp critical
-                    {
-                        goodness_positive_vals.push_back(goodness);
-                    }
+                    goodness_positive_vals.push_back(goodness);
 
                     if (goodness > threshold) {
                         ++correct_positive;
                     }
                 }
 
-                // Evaluación en muestras negativas
-                #pragma omp parallel for reduction(+:correct_negative)
+                // Evaluación en muestras negativas (sin OpenMP)
                 for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
                     const Eigen::VectorXf& input = val_negative_samples.getSample(i);
                     Eigen::VectorXf output;
                     current_layer.forward(input, output, false, false, threshold, activation, activation_derivative);
 
                     float goodness = output.squaredNorm();
-                    #pragma omp critical
-                    {
-                        goodness_negative_vals.push_back(goodness);
-                    }
+                    goodness_negative_vals.push_back(goodness);
 
                     if (goodness < threshold) {
                         ++correct_negative;
@@ -1243,8 +1045,7 @@ void trainModel() {
             std::mt19937 g(rd());
             std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
 
-            // Entrenamiento en la lista combinada barajada
-            #pragma omp parallel for schedule(static)
+            // Entrenamiento en la lista combinada barajada (sin OpenMP)
             for (size_t i = 0; i < combined_train_samples.size(); ++i) {
                 const Eigen::VectorXf& input = combined_train_samples[i].first.get();
                 bool is_positive = combined_train_samples[i].second;
@@ -1259,36 +1060,28 @@ void trainModel() {
             goodness_positive_vals.clear();
             goodness_negative_vals.clear();
 
-            // Evaluación en muestras positivas
-            #pragma omp parallel for reduction(+:correct_positive)
+            // Evaluación en muestras positivas (sin OpenMP)
             for (size_t i = 0; i < val_positive_size; ++i) {
                 const Eigen::VectorXf& input = val_positive_samples.getSample(i);
                 Eigen::VectorXf output;
                 layer.forward(input, output, false, true, threshold, activation, activation_derivative);
 
                 float goodness = output.squaredNorm();
-                #pragma omp critical
-                {
-                    goodness_positive_vals.push_back(goodness);
-                }
+                goodness_positive_vals.push_back(goodness);
 
                 if (goodness > threshold) {
                     ++correct_positive;
                 }
             }
 
-            // Evaluación en muestras negativas
-            #pragma omp parallel for reduction(+:correct_negative)
+            // Evaluación en muestras negativas (sin OpenMP)
             for (size_t i = 0; i < val_negative_size; ++i) {
                 const Eigen::VectorXf& input = val_negative_samples.getSample(i);
                 Eigen::VectorXf output;
                 layer.forward(input, output, false, false, threshold, activation, activation_derivative);
 
                 float goodness = output.squaredNorm();
-                #pragma omp critical
-                {
-                    goodness_negative_vals.push_back(goodness);
-                }
+                goodness_negative_vals.push_back(goodness);
 
                 if (goodness < threshold) {
                     ++correct_negative;
