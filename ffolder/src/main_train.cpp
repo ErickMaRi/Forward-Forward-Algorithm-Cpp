@@ -1,9 +1,12 @@
 //src/main_train.cpp
 
+#define EIGEN_USE_THREADS
 #include "neural_network.hpp"
 #include "optimizer.hpp"
 #include "scatter_plot_data.hpp"
+#include <Eigen/Core>
 #include <Eigen/Dense>
+#include <thread> 
 #include <opencv2/opencv.hpp>
 #include <iostream>
 #include <random>
@@ -15,6 +18,8 @@
 #include <cmath>
 #include <memory>
 #include <stdexcept>
+#include <omp.h>
+#include <fstream>
 
 namespace fs = std::filesystem;
 
@@ -64,42 +69,6 @@ Eigen::VectorXf applyPermutation(const Eigen::VectorXf& image, const std::vector
 }
 
 /**
- * @brief Divide el conjunto de datos en entrenamiento y validación, aplicando una permutación fija.
- * @param dataset Conjunto de datos completo.
- * @param train_fraction Fracción de datos para entrenamiento.
- * @param train_set Referencia al conjunto de entrenamiento.
- * @param val_set Referencia al conjunto de validación.
- * @param permutation Vector de permutación a aplicar.
- */
-void splitDataset(const Dataset& dataset, float train_fraction,
-                 Dataset& train_set, Dataset& val_set,
-                 const std::vector<size_t>& permutation) {
-    size_t total_samples = dataset.getNumSamples();
-    size_t train_samples = static_cast<size_t>(total_samples * train_fraction);
-
-    std::vector<size_t> indices(total_samples);
-    std::iota(indices.begin(), indices.end(), 0);
-    std::shuffle(indices.begin(), indices.end(), std::mt19937{ std::random_device{}() });
-
-    for (size_t i = 0; i < train_samples; ++i) {
-        Eigen::VectorXf permuted_sample = applyPermutation(dataset.getSample(indices[i]), permutation);
-        train_set.addSample(permuted_sample, dataset.getImagePath(indices[i]));
-    }
-    for (size_t i = train_samples; i < total_samples; ++i) {
-        Eigen::VectorXf permuted_sample = applyPermutation(dataset.getSample(indices[i]), permutation);
-        val_set.addSample(permuted_sample, dataset.getImagePath(indices[i]));
-    }
-
-    // Copia las propiedades de imagen
-    train_set.setImageProperties(dataset.getImageHeight(),
-                                 dataset.getImageWidth(),
-                                 dataset.getNumChannels());
-    val_set.setImageProperties(dataset.getImageHeight(),
-                               dataset.getImageWidth(),
-                               dataset.getNumChannels());
-}
-
-/**
  * @brief Permite al usuario seleccionar un optimizador.
  * @return Puntero compartido al optimizador seleccionado.
  */
@@ -108,11 +77,8 @@ std::shared_ptr<Optimizer> selectOptimizer() {
     std::cout << "\nSeleccione el optimizador:\n";
     std::cout << "1. SGD Optimizer\n";
     std::cout << "2. Adam Optimizer\n";
-    std::cout << "3. RMSProp Optimizer\n";
-    std::cout << "4. Adagrad Optimizer\n";
-    std::cout << "5. Adadelta Optimizer\n";
-    std::cout << "6. AdamW Optimizer\n";
-    std::cout << "7. Low Pass Filter Optimizer\n";
+    std::cout << "3. Low Pass Filter Optimizer\n";
+    std::cout << "4. AdaBelief Optimizer\n";
     std::cout << "Ingrese su elección: ";
     std::cin >> optimizer_choice;
 
@@ -122,8 +88,7 @@ std::shared_ptr<Optimizer> selectOptimizer() {
 
             std::cout << "Ingrese el learning rate para SGD Optimizer (ej. 0.0001): ";
             std::cin >> learning_rate;
-
-            std::cout << "Ingrese el valor de momentum (ej. 0 para sin momentum): ";
+            std::cout << "Ingrese el valor de momentum (ej. 0.9 o 0): ";
             std::cin >> momentum;
 
             return std::make_shared<SGDOptimizer>(learning_rate, momentum);
@@ -131,96 +96,57 @@ std::shared_ptr<Optimizer> selectOptimizer() {
         case 2: {
             float learning_rate, beta1, beta2, epsilon;
 
-            std::cout << "Ingrese el learning rate para Adam Optimizer (ej. 0.00001): ";
+            std::cout << "Ingrese el learning rate para Adam Optimizer (ej. 0.0001): ";
             std::cin >> learning_rate;
 
-            std::cout << "Ingrese el valor de beta1 (ej. 0.9): ";
+            std::cout << "Ingrese beta1 (ej. 0.9): ";
             std::cin >> beta1;
-
-            std::cout << "Ingrese el valor de beta2 (ej. 0.999): ";
+            std::cout << "Ingrese beta2 (ej. 0.999): ";
             std::cin >> beta2;
-
-            std::cout << "Ingrese el valor de epsilon (ej. 1e-8): ";
+            std::cout << "Ingrese epsilon (ej. 1e-8): ";
             std::cin >> epsilon;
 
             return std::make_shared<AdamOptimizer>(learning_rate, beta1, beta2, epsilon);
         }
         case 3: {
-            float learning_rate, beta, epsilon;
-
-            std::cout << "Ingrese el learning rate para RMSProp Optimizer (ej. 0.00001): ";
-            std::cin >> learning_rate;
-
-            std::cout << "Ingrese el valor de beta (ej. 0.9): ";
-            std::cin >> beta;
-
-            std::cout << "Ingrese el valor de epsilon (ej. 1e-8): ";
-            std::cin >> epsilon;
-
-            return std::make_shared<RMSPropOptimizer>(learning_rate, beta, epsilon);
-        }
-        case 4: {
-            float learning_rate, epsilon;
-
-            std::cout << "Ingrese el learning rate para Adagrad Optimizer (ej. 0.0001): ";
-            std::cin >> learning_rate;
-
-            std::cout << "Ingrese el valor de epsilon (ej. 1e-8): ";
-            std::cin >> epsilon;
-
-            return std::make_shared<AdagradOptimizer>(learning_rate, epsilon);
-        }
-        case 5: {
-            float rho, epsilon;
-
-            std::cout << "Ingrese el valor de rho para Adadelta Optimizer (ej. 0.95): ";
-            std::cin >> rho;
-
-            std::cout << "Ingrese el valor de epsilon (ej. 1e-6): ";
-            std::cin >> epsilon;
-
-            return std::make_shared<AdadeltaOptimizer>(rho, epsilon);
-        }
-        case 6: {
-            float learning_rate, beta1, beta2, epsilon, weight_decay;
-
-            std::cout << "Ingrese el learning rate para AdamW Optimizer (ej. 0.00001): ";
-            std::cin >> learning_rate;
-
-            std::cout << "Ingrese el valor de beta1 (ej. 0.9): ";
-            std::cin >> beta1;
-
-            std::cout << "Ingrese el valor de beta2 (ej. 0.999): ";
-            std::cin >> beta2;
-
-            std::cout << "Ingrese el valor de epsilon (ej. 1e-8): ";
-            std::cin >> epsilon;
-
-            std::cout << "Ingrese el valor de weight decay (ej. 0.0001): ";
-            std::cin >> weight_decay;
-
-            return std::make_shared<AdamWOptimizer>(learning_rate, beta1, beta2, epsilon, weight_decay);
-        }
-        case 7: {
             float learning_rate, alpha;
 
             std::cout << "Ingrese el learning rate para Low Pass Filter Optimizer (ej. 0.0001): ";
             std::cin >> learning_rate;
-
             std::cout << "Ingrese el valor de alpha (ej. 0.1): ";
             std::cin >> alpha;
 
             return std::make_shared<LowPassFilterOptimizer>(learning_rate, alpha);
         }
-        default:
+        case 4: {
+            float learning_rate, beta1, beta2, epsilon;
+
+            std::cout << "Ingrese el learning rate para AdaBelief Optimizer (ej. 0.0001): ";
+            std::cin >> learning_rate;
+            std::cout << "Ingrese beta1 (ej. 0.9): ";
+            std::cin >> beta1;
+            std::cout << "Ingrese beta2 (ej. 0.999): ";
+            std::cin >> beta2;
+            std::cout << "Ingrese epsilon (ej. 1e-8): ";
+            std::cin >> epsilon;
+
+            return std::make_shared<AdaBeliefOptimizer>(learning_rate, beta1, beta2, epsilon);
+        }
+        default: {
             std::cout << "Opción inválida. Usando Adam Optimizer con valores por defecto.\n";
             return std::make_shared<AdamOptimizer>();
+        }
     }
 }
+
 
 // ================================
 // Funciones para Visualización
 // ================================
+
+/**
+ * @brief Visualiza los datos usando PCA.
+ */
 void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
                   Dataset& val_negative_samples, int num_components,
                   float threshold) {
@@ -415,6 +341,9 @@ void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
     cv::waitKey(0);
 }
 
+/**
+ * @brief Función para plotear histogramas combinados.
+ */
 void plotGoodnessHistogramsCombined(const std::vector<float>& goodness_positive_vals,
                                     const std::vector<float>& goodness_negative_vals,
                                     float threshold,
@@ -497,6 +426,9 @@ void plotGoodnessHistogramsCombined(const std::vector<float>& goodness_positive_
     cv::imwrite(save_file, histImageCombined);
 }
 
+/**
+ * @brief Función para plotear histogramas separados (si es necesario).
+ */
 void plotGoodnessHistograms(const std::vector<float>& goodness_positive_vals,
                             const std::vector<float>& goodness_negative_vals,
                             float threshold,
@@ -593,60 +525,48 @@ void plotGoodnessHistograms(const std::vector<float>& goodness_positive_vals,
 void trainModel() {
     try {
         std::cout << "Cargando conjuntos de datos...\n";
-        Dataset positive_samples("data/positive_images/"); // Directorio de imágenes positivas
-        Dataset negative_samples("data/negative_images/"); // Directorio de imágenes negativas
+        
+        // Cargamos directamente datos de entrenamiento y validación de carpetas separadas
+        Dataset train_positive_samples("data/positive_images/train/");
+        Dataset val_positive_samples("data/positive_images/val/");
+        Dataset train_negative_samples("data/negative_images/train/");
+        Dataset val_negative_samples("data/negative_images/val/");
 
-        if (positive_samples.getNumSamples() == 0 ||
-            negative_samples.getNumSamples() == 0) {
-            throw std::runtime_error("Conjuntos de datos positivos o negativos están vacíos.");
+        if (train_positive_samples.getNumSamples() == 0 ||
+            val_positive_samples.getNumSamples() == 0 ||
+            train_negative_samples.getNumSamples() == 0 ||
+            val_negative_samples.getNumSamples() == 0) {
+            throw std::runtime_error("Algún conjunto de datos (train o val) está vacío.");
         }
 
-        // Generar una permutación fija basada en el tamaño de entrada
-        size_t input_size = positive_samples.getInputSize(); // Asegúrate de que esto corresponde al tamaño de cada imagen
+        size_t input_size = train_positive_samples.getInputSize(); // Asegúrate de que esto corresponde al tamaño de cada imagen
         std::vector<size_t> permutation = generateFixedPermutation(input_size);
 
-        Dataset train_positive_samples, val_positive_samples;
-        Dataset train_negative_samples, val_negative_samples;
-
-        // Divide los conjuntos de datos en entrenamiento (80%) y validación (20%) aplicando la permutación
-        splitDataset(positive_samples, 0.8f, train_positive_samples,
-                     val_positive_samples, permutation);
-        splitDataset(negative_samples, 0.8f, train_negative_samples,
-                     val_negative_samples, permutation);
-
-        // Selecciona el optimizador
         std::shared_ptr<Optimizer> optimizer = selectOptimizer();
 
-        // Pregunta al usuario si desea utilizar un umbral dinámico
         bool dynamic_threshold = false;
         std::cout << "¿Desea utilizar un umbral dinámico? (1 = Sí, 0 = No): ";
         int threshold_choice;
         std::cin >> threshold_choice;
         dynamic_threshold = (threshold_choice == 1);
 
-        // Solicita al usuario el umbral inicial
         float threshold;
         std::cout << "Ingrese el umbral inicial para determinar la bondad: ";
         std::cin >> threshold;
 
-        // Declaramos la variable para almacenar el mejor umbral global
         float best_overall_threshold = threshold;
 
-        // Solicita al usuario el número total de épocas de entrenamiento largo
         size_t total_epochs_long;
         std::cout << "Ingrese el número total de épocas de entrenamiento largo: ";
         std::cin >> total_epochs_long;
 
-        // Vectores para almacenar las bondades durante la evaluación
         std::vector<float> goodness_positive_vals;
         std::vector<float> goodness_negative_vals;
 
-        // Solicita al usuario el tamaño de la capa completamente conectada
         size_t output_size;
         std::cout << "Ingrese el tamaño de la capa (número de neuronas): ";
         std::cin >> output_size;
 
-        // Solicita al usuario la cantidad de inicializaciones y épocas por inicialización
         size_t num_initializations;
         size_t initial_epochs;
         std::cout << "Ingrese el número de inicializaciones iniciales: ";
@@ -654,20 +574,16 @@ void trainModel() {
         std::cout << "Ingrese el número de épocas por inicialización (1 a 4): ";
         std::cin >> initial_epochs;
 
-        // Solicita al usuario el número de mejores modelos a recordar (ntop)
         size_t ntop;
         std::cout << "Ingrese el número de mejores modelos a recordar (ntop): ";
         std::cin >> ntop;
 
-        // Configuración de la paciencia (tolerancia)
         size_t patience;
         std::cout << "Ingrese el número de épocas de tolerancia sin mejora (patience): ";
         std::cin >> patience;
 
-        // Asegurarse de que la carpeta principal para los histogramas y ntop cache existan
         fs::create_directories("histograms");
         fs::create_directories("ntop_cache");
-
         // Lista para almacenar los mejores ntop modelos y sus puntuaciones
         std::vector<std::pair<double, std::string>> top_models; // <score, filepath>
 
@@ -704,16 +620,22 @@ void trainModel() {
                 }
 
                 // Barajar la lista combinada
-                std::random_device rd;
-                std::mt19937 g(rd());
-                std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
+                {
+                    std::random_device rd;
+                    std::mt19937 g(rd());
+                    std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
+                }
 
-                // Entrenamiento en la lista combinada barajada (sin OpenMP)
+                // Entrenamiento con paralelización y sección crítica para actualizar pesos
+                // #pragma omp parallel for
                 for (size_t i = 0; i < combined_train_samples.size(); ++i) {
                     const Eigen::VectorXf& input = combined_train_samples[i].first.get();
                     bool is_positive = combined_train_samples[i].second;
                     Eigen::VectorXf output;
-                    current_layer.forward(input, output, true, is_positive, threshold, activation, activation_derivative);
+                    // #pragma omp critical
+                    {
+                        current_layer.forward(input, output, true, is_positive, threshold, activation, activation_derivative);
+                    }
                 }
 
                 // Evaluación en conjunto de validación
@@ -723,32 +645,49 @@ void trainModel() {
                 goodness_positive_vals.clear();
                 goodness_negative_vals.clear();
 
-                // Evaluación en muestras positivas (sin OpenMP)
-                for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
-                    const Eigen::VectorXf& input = val_positive_samples.getSample(i);
-                    Eigen::VectorXf output;
-                    current_layer.forward(input, output, false, true, threshold, activation, activation_derivative);
+                // Evaluación en muestras positivas - paralelizado
+                {
+                    std::vector<float> local_goodness_positive;
+                    // #pragma omp parallel for reduction(+:correct_positive)
+                    for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+                        const Eigen::VectorXf& input = val_positive_samples.getSample(i);
+                        Eigen::VectorXf output;
+                        current_layer.forward(input, output, false, true, threshold, activation, activation_derivative);
 
-                    float goodness = output.squaredNorm();
-                    goodness_positive_vals.push_back(goodness);
+                        float goodness = output.squaredNorm();
+                        if (goodness > threshold) {
+                            correct_positive++;
+                        }
 
-                    if (goodness > threshold) {
-                        ++correct_positive;
+                        // #pragma omp critical
+                        {
+                            local_goodness_positive.push_back(goodness);
+                        }
                     }
+                    // Mover los datos locales fuera de la sección paralela
+                    goodness_positive_vals = std::move(local_goodness_positive);
                 }
 
-                // Evaluación en muestras negativas (sin OpenMP)
-                for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
-                    const Eigen::VectorXf& input = val_negative_samples.getSample(i);
-                    Eigen::VectorXf output;
-                    current_layer.forward(input, output, false, false, threshold, activation, activation_derivative);
+                // Evaluación en muestras negativas - paralelizado
+                {
+                    std::vector<float> local_goodness_negative;
+                    // #pragma omp parallel for reduction(+:correct_negative)
+                    for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+                        const Eigen::VectorXf& input = val_negative_samples.getSample(i);
+                        Eigen::VectorXf output;
+                        current_layer.forward(input, output, false, false, threshold, activation, activation_derivative);
 
-                    float goodness = output.squaredNorm();
-                    goodness_negative_vals.push_back(goodness);
+                        float goodness = output.squaredNorm();
+                        if (goodness < threshold) {
+                            correct_negative++;
+                        }
 
-                    if (goodness < threshold) {
-                        ++correct_negative;
+                        // #pragma omp critical
+                        {
+                            local_goodness_negative.push_back(goodness);
+                        }
                     }
+                    goodness_negative_vals = std::move(local_goodness_negative);
                 }
 
                 // Calcula la precisión
@@ -787,7 +726,7 @@ void trainModel() {
                 }
 
                 // Ajusta dinámicamente el umbral si está habilitado
-                if (dynamic_threshold) {
+                if (dynamic_threshold && !goodness_positive_vals.empty() && !goodness_negative_vals.empty()) {
                     float avg_goodness_positive = std::accumulate(goodness_positive_vals.begin(),
                                                                   goodness_positive_vals.end(), 0.0f) / goodness_positive_vals.size();
                     float avg_goodness_negative = std::accumulate(goodness_negative_vals.begin(),
@@ -841,29 +780,35 @@ void trainModel() {
         size_t correct_positive_individual = 0;
         size_t correct_negative_individual = 0;
 
-        // Evaluación en muestras positivas
-        for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
-            const Eigen::VectorXf& input = val_positive_samples.getSample(i);
-            Eigen::VectorXf output;
-            best_individual_model.forward(input, output, false, true, threshold, activation, activation_derivative);
+        // Evaluación en muestras positivas (paralelizado)
+        {
+            // #pragma omp parallel for reduction(+:correct_positive_individual)
+            for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+                const Eigen::VectorXf& input = val_positive_samples.getSample(i);
+                Eigen::VectorXf output;
+                best_individual_model.forward(input, output, false, true, threshold, activation, activation_derivative);
 
-            float goodness = output.squaredNorm();
+                float goodness = output.squaredNorm();
 
-            if (goodness > threshold) {
-                ++correct_positive_individual;
+                if (goodness > threshold) {
+                    correct_positive_individual++;
+                }
             }
         }
 
-        // Evaluación en muestras negativas
-        for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
-            const Eigen::VectorXf& input = val_negative_samples.getSample(i);
-            Eigen::VectorXf output;
-            best_individual_model.forward(input, output, false, false, threshold, activation, activation_derivative);
+        // Evaluación en muestras negativas (paralelizado)
+        {
+            // #pragma omp parallel for reduction(+:correct_negative_individual)
+            for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+                const Eigen::VectorXf& input = val_negative_samples.getSample(i);
+                Eigen::VectorXf output;
+                best_individual_model.forward(input, output, false, false, threshold, activation, activation_derivative);
 
-            float goodness = output.squaredNorm();
+                float goodness = output.squaredNorm();
 
-            if (goodness < threshold) {
-                ++correct_negative_individual;
+                if (goodness < threshold) {
+                    correct_negative_individual++;
+                }
             }
         }
 
@@ -886,56 +831,60 @@ void trainModel() {
         size_t correct_positive_ensemble_vote = 0;
         size_t correct_negative_ensemble_vote = 0;
 
-        // Evaluación en muestras positivas
-        for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
-            const Eigen::VectorXf& input = val_positive_samples.getSample(i);
-            int votes = 0;
+        // Evaluación en muestras positivas (votación, paralelizado)
+        {
+            // #pragma omp parallel for reduction(+:correct_positive_ensemble_vote)
+            for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+                const Eigen::VectorXf& input = val_positive_samples.getSample(i);
+                int votes = 0;
 
-            for (auto& model : ensemble_models) {
-                Eigen::VectorXf output;
-                model.forward(input, output, false, true, threshold, activation, activation_derivative);
-                float goodness = output.squaredNorm();
+                for (auto& model : ensemble_models) {
+                    Eigen::VectorXf output;
+                    model.forward(input, output, false, true, threshold, activation, activation_derivative);
+                    float goodness = output.squaredNorm();
 
-                if (goodness > threshold) {
-                    votes++;
+                    if (goodness > threshold) {
+                        votes++;
+                    }
                 }
-            }
 
-            if (votes > static_cast<int>(ensemble_models.size() / 2)) {
-                ++correct_positive_ensemble_vote;
+                if (votes > static_cast<int>(ensemble_models.size() / 2)) {
+                    correct_positive_ensemble_vote++;
+                }
             }
         }
 
-        // Evaluación en muestras negativas
-        for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
-            const Eigen::VectorXf& input = val_negative_samples.getSample(i);
-            int votes = 0;
+        // Evaluación en muestras negativas (votación, paralelizado)
+        {
+            // #pragma omp parallel for reduction(+:correct_negative_ensemble_vote)
+            for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+                const Eigen::VectorXf& input = val_negative_samples.getSample(i);
+                int votes = 0;
 
-            for (auto& model : ensemble_models) {
-                Eigen::VectorXf output;
-                model.forward(input, output, false, false, threshold, activation, activation_derivative);
-                float goodness = output.squaredNorm();
+                for (auto& model : ensemble_models) {
+                    Eigen::VectorXf output;
+                    model.forward(input, output, false, false, threshold, activation, activation_derivative);
+                    float goodness = output.squaredNorm();
 
-                if (goodness < threshold) {
-                    votes++;
+                    if (goodness < threshold) {
+                        votes++;
+                    }
                 }
-            }
 
-            if (votes > static_cast<int>(ensemble_models.size() / 2)) {
-                ++correct_negative_ensemble_vote;
+                if (votes > static_cast<int>(ensemble_models.size() / 2)) {
+                    correct_negative_ensemble_vote++;
+                }
             }
         }
 
         double accuracy_ensemble_vote = (static_cast<double>(correct_positive_ensemble_vote + correct_negative_ensemble_vote) /
                                         (val_positive_samples.getNumSamples() + val_negative_samples.getNumSamples())) * 100.0;
-
         std::cout << "Precisión del ensemble mediante votación: " << accuracy_ensemble_vote << "%\n";
 
         // Crear el modelo promedio (promediando pesos y biases)
         std::cout << "\n--- Creando el modelo promedio (promedio de pesos y biases) ---\n";
         FullyConnectedLayer averaged_model = ensemble_models.front(); // Inicializar con el primer modelo
 
-        // Promediar los pesos y biases de los modelos
         Eigen::MatrixXf accumulated_weights = averaged_model.getWeights();
         Eigen::VectorXf accumulated_biases = averaged_model.getBiases();
 
@@ -955,29 +904,35 @@ void trainModel() {
         size_t correct_positive_averaged = 0;
         size_t correct_negative_averaged = 0;
 
-        // Evaluación en muestras positivas
-        for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
-            const Eigen::VectorXf& input = val_positive_samples.getSample(i);
-            Eigen::VectorXf output;
-            averaged_model.forward(input, output, false, true, threshold, activation, activation_derivative);
+        // Evaluación positivas (promedio, paralelizado)
+        {
+            // #pragma omp parallel for reduction(+:correct_positive_averaged)
+            for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+                const Eigen::VectorXf& input = val_positive_samples.getSample(i);
+                Eigen::VectorXf output;
+                averaged_model.forward(input, output, false, true, threshold, activation, activation_derivative);
 
-            float goodness = output.squaredNorm();
+                float goodness = output.squaredNorm();
 
-            if (goodness > threshold) {
-                ++correct_positive_averaged;
+                if (goodness > threshold) {
+                    correct_positive_averaged++;
+                }
             }
         }
 
-        // Evaluación en muestras negativas
-        for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
-            const Eigen::VectorXf& input = val_negative_samples.getSample(i);
-            Eigen::VectorXf output;
-            averaged_model.forward(input, output, false, false, threshold, activation, activation_derivative);
+        // Evaluación negativas (promedio, paralelizado)
+        {
+            // #pragma omp parallel for reduction(+:correct_negative_averaged)
+            for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+                const Eigen::VectorXf& input = val_negative_samples.getSample(i);
+                Eigen::VectorXf output;
+                averaged_model.forward(input, output, false, false, threshold, activation, activation_derivative);
 
-            float goodness = output.squaredNorm();
+                float goodness = output.squaredNorm();
 
-            if (goodness < threshold) {
-                ++correct_negative_averaged;
+                if (goodness < threshold) {
+                    correct_negative_averaged++;
+                }
             }
         }
 
@@ -1041,16 +996,22 @@ void trainModel() {
             }
 
             // Barajar la lista combinada
-            std::random_device rd;
-            std::mt19937 g(rd());
-            std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
+            {
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
+            }
 
-            // Entrenamiento en la lista combinada barajada (sin OpenMP)
+            // Entrenamiento largo con paralelización
+            // #pragma omp parallel for
             for (size_t i = 0; i < combined_train_samples.size(); ++i) {
                 const Eigen::VectorXf& input = combined_train_samples[i].first.get();
                 bool is_positive = combined_train_samples[i].second;
                 Eigen::VectorXf output;
-                layer.forward(input, output, true, is_positive, threshold, activation, activation_derivative);
+                // #pragma omp critical
+                {
+                    layer.forward(input, output, true, is_positive, threshold, activation, activation_derivative);
+                }
             }
 
             // Evaluación en conjunto de validación
@@ -1060,32 +1021,48 @@ void trainModel() {
             goodness_positive_vals.clear();
             goodness_negative_vals.clear();
 
-            // Evaluación en muestras positivas (sin OpenMP)
-            for (size_t i = 0; i < val_positive_size; ++i) {
-                const Eigen::VectorXf& input = val_positive_samples.getSample(i);
-                Eigen::VectorXf output;
-                layer.forward(input, output, false, true, threshold, activation, activation_derivative);
+            // Evaluación en muestras positivas - paralelizado
+            {
+                std::vector<float> local_goodness_positive;
+                // #pragma omp parallel for reduction(+:correct_positive)
+                for (size_t i = 0; i < val_positive_size; ++i) {
+                    const Eigen::VectorXf& input = val_positive_samples.getSample(i);
+                    Eigen::VectorXf output;
+                    layer.forward(input, output, false, true, threshold, activation, activation_derivative);
 
-                float goodness = output.squaredNorm();
-                goodness_positive_vals.push_back(goodness);
+                    float goodness = output.squaredNorm();
+                    if (goodness > threshold) {
+                        correct_positive++;
+                    }
 
-                if (goodness > threshold) {
-                    ++correct_positive;
+                    // #pragma omp critical
+                    {
+                        local_goodness_positive.push_back(goodness);
+                    }
                 }
+                goodness_positive_vals = std::move(local_goodness_positive);
             }
 
-            // Evaluación en muestras negativas (sin OpenMP)
-            for (size_t i = 0; i < val_negative_size; ++i) {
-                const Eigen::VectorXf& input = val_negative_samples.getSample(i);
-                Eigen::VectorXf output;
-                layer.forward(input, output, false, false, threshold, activation, activation_derivative);
+            // Evaluación en muestras negativas - paralelizado
+            {
+                std::vector<float> local_goodness_negative;
+                // #pragma omp parallel for reduction(+:correct_negative)
+                for (size_t i = 0; i < val_negative_size; ++i) {
+                    const Eigen::VectorXf& input = val_negative_samples.getSample(i);
+                    Eigen::VectorXf output;
+                    layer.forward(input, output, false, false, threshold, activation, activation_derivative);
 
-                float goodness = output.squaredNorm();
-                goodness_negative_vals.push_back(goodness);
+                    float goodness = output.squaredNorm();
+                    if (goodness < threshold) {
+                        correct_negative++;
+                    }
 
-                if (goodness < threshold) {
-                    ++correct_negative;
+                    // #pragma omp critical
+                    {
+                        local_goodness_negative.push_back(goodness);
+                    }
                 }
+                goodness_negative_vals = std::move(local_goodness_negative);
             }
 
             // Calcula la precisión
@@ -1124,7 +1101,7 @@ void trainModel() {
             }
 
             // Ajusta dinámicamente el umbral si está habilitado
-            if (dynamic_threshold) {
+            if (dynamic_threshold && !goodness_positive_vals.empty() && !goodness_negative_vals.empty()) {
                 float avg_goodness_positive = std::accumulate(goodness_positive_vals.begin(),
                                                               goodness_positive_vals.end(), 0.0f) / goodness_positive_vals.size();
                 float avg_goodness_negative = std::accumulate(goodness_negative_vals.begin(),
@@ -1178,8 +1155,549 @@ void trainModel() {
     }
 }
 
+// =====================================================
+// Modo "Bayesiano" (realmente random) con CSV de salida
+// =====================================================
+/**
+ * @brief Genera un flotante aleatorio en [min_val, max_val].
+ */
+float randomFloatInRange(float min_val, float max_val) {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> dist(min_val, max_val);
+    return dist(gen);
+}
+
+/**
+ * @brief Pequeña función de entrenamiento simplificado para
+ *        usar en la búsqueda “bayesiana”: sin histogramas ni PCA.
+ * @param train_positive_samples, val_positive_samples, etc. Conjuntos de datos
+ * @param optimizer Puntero al optimizador
+ * @param layerSize Tamaño de la capa
+ * @param threshold Valor de umbral inicial
+ * @param dynamic_threshold Indica si se ajusta automáticamente
+ * @param num_init, init_epochs, ntop, patience, total_epochs Largo
+ * @return Precisión final en la validación
+ */
+double trainAndEvaluateBayes(Dataset& train_positive_samples,
+                             Dataset& val_positive_samples,
+                             Dataset& train_negative_samples,
+                             Dataset& val_negative_samples,
+                             std::shared_ptr<Optimizer> optimizer,
+                             size_t layerSize,
+                             float threshold,
+                             bool dynamic_threshold,
+                             size_t num_init,
+                             size_t init_epochs,
+                             size_t ntop,
+                             size_t patience,
+                             size_t total_epochs_long) {
+    size_t input_size = train_positive_samples.getInputSize();
+
+    // Lista para almacenar los mejores ntop modelos y sus puntuaciones
+    std::vector<std::pair<double, std::string>> top_models; // <score, filepath>
+
+    std::cout << "\n[Bayes] *** Nuevo Trial ***" 
+              << "\n      layerSize=" << layerSize
+              << " threshold=" << threshold
+              << " dynamic_threshold=" << (dynamic_threshold ? "Yes":"No")
+              << " #init=" << num_init 
+              << " init_epochs=" << init_epochs
+              << " total_long=" << total_epochs_long
+              << "\n";
+
+    double best_score_init_global = -std::numeric_limits<double>::infinity();
+
+    // ---------------------------
+    // 3) Múltiples inicializaciones cortas
+    // ---------------------------
+    for (size_t init_i = 0; init_i < num_init; ++init_i) {
+        std::cout << "[Bayes] Inicialización " << (init_i + 1) << "/" << num_init << "\n";
+
+        // Capa con pesos aleatorios
+        FullyConnectedLayer current_layer(input_size, layerSize, optimizer);
+
+        // Track del mejor de esta inicialización
+        double best_score_local = -std::numeric_limits<double>::infinity();
+        FullyConnectedLayer best_local_layer = current_layer;
+        float best_local_threshold = threshold;
+        size_t epochs_no_improve_local = 0;
+
+        // --- Entrenamiento corto con 'init_epochs' ---
+        for (size_t epoch = 0; epoch < init_epochs; ++epoch) {
+            std::cout << "   [Init=" << (init_i+1) 
+                      << "] Época " << (epoch+1) << "/" << init_epochs << "\n";
+
+            // Barajar
+            train_positive_samples.shuffle();
+            train_negative_samples.shuffle();
+
+            // Combinar datos
+            std::vector<std::pair<std::reference_wrapper<const Eigen::VectorXf>, bool>> combined;
+            combined.reserve(train_positive_samples.getNumSamples() + train_negative_samples.getNumSamples());
+            for (size_t i = 0; i < train_positive_samples.getNumSamples(); ++i) {
+                combined.emplace_back(train_positive_samples.getSample(i), true);
+            }
+            for (size_t i = 0; i < train_negative_samples.getNumSamples(); ++i) {
+                combined.emplace_back(train_negative_samples.getSample(i), false);
+            }
+
+            // Re-barajamos la lista combinada
+            {
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::shuffle(combined.begin(), combined.end(), g);
+            }
+
+            // Forward + training
+            for (size_t i = 0; i < combined.size(); ++i) {
+                bool is_pos = combined[i].second;
+                const Eigen::VectorXf& input_data = combined[i].first.get();
+                Eigen::VectorXf out;
+                current_layer.forward(input_data, out, true, is_pos, threshold, activation, activation_derivative);
+            }
+
+            // Evaluación en validación
+            size_t correct_pos = 0;
+            size_t correct_neg = 0;
+            std::vector<float> goodness_positive_vals;
+            std::vector<float> goodness_negative_vals;
+
+            // Positivos
+            for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+                Eigen::VectorXf out;
+                current_layer.forward(val_positive_samples.getSample(i), out, false, true, threshold, activation, activation_derivative);
+                float good = out.squaredNorm();
+                if (good > threshold) {
+                    correct_pos++;
+                }
+                goodness_positive_vals.push_back(good);
+            }
+
+            // Negativos
+            for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+                Eigen::VectorXf out;
+                current_layer.forward(val_negative_samples.getSample(i), out, false, false, threshold, activation, activation_derivative);
+                float good = out.squaredNorm();
+                if (good < threshold) {
+                    correct_neg++;
+                }
+                goodness_negative_vals.push_back(good);
+            }
+
+            // Cálculo de accuracy
+            double accuracy = 100.0 * (double)(correct_pos + correct_neg)
+                              / (val_positive_samples.getNumSamples() + val_negative_samples.getNumSamples());
+
+            std::cout << "      Accuracy val = " << accuracy << "%\n";
+
+            // Early stopping local
+            if (accuracy > best_score_local) {
+                best_score_local = accuracy;
+                epochs_no_improve_local = 0;
+                best_local_layer = current_layer;
+                best_local_threshold = threshold;
+            } else {
+                epochs_no_improve_local++;
+            }
+
+            if (epochs_no_improve_local >= patience) {
+                std::cout << "   [Init=" << (init_i+1) 
+                          << "] No mejora en " << patience << " épocas. Revierto.\n";
+                current_layer = best_local_layer;
+                threshold = best_local_threshold;
+                epochs_no_improve_local = 0;
+                break;
+            }
+
+            // Ajuste dinámico de umbral si corresponde
+            if (dynamic_threshold &&
+                !goodness_positive_vals.empty() && !goodness_negative_vals.empty()) {
+                float avg_pos = std::accumulate(goodness_positive_vals.begin(), goodness_positive_vals.end(), 0.0f)
+                                / goodness_positive_vals.size();
+                float avg_neg = std::accumulate(goodness_negative_vals.begin(), goodness_negative_vals.end(), 0.0f)
+                                / goodness_negative_vals.size();
+                threshold = (avg_pos + avg_neg) * 0.5f;
+            }
+        } // Fin for epoch
+
+        // Al terminar las init_epochs, guardar el mejor local en top_models
+        // Guardar el modelo en un archivo temporal
+        std::string model_filename = "ntop_cache/bayes_trial_layerSize_" + std::to_string(layerSize) + "_init_" + std::to_string(init_i+1) + ".bin";
+        best_local_layer.saveModel(model_filename);
+
+        // Agregar el modelo y su puntuación a top_models
+        top_models.emplace_back(best_score_local, model_filename);
+
+        // Ordenar top_models y mantener solo ntop mejores
+        std::sort(top_models.begin(), top_models.end(),
+                  [](const std::pair<double, std::string>& a, const std::pair<double, std::string>& b) {
+                      return a.first > b.first; // Orden descendente
+                  });
+
+        if (top_models.size() > ntop) {
+            // Eliminar modelos sobrantes
+            for (size_t i = ntop; i < top_models.size(); ++i) {
+                fs::remove(top_models[i].second); // Eliminar archivo del modelo
+            }
+            top_models.resize(ntop);
+        }
+
+        // Mantener el mejor score global dentro del trial
+        if (top_models[0].first > best_score_init_global) {
+            best_score_init_global = top_models[0].first;
+        }
+    } // Fin for init_i
+
+    // -------------------------------------
+    // 4) Tomar el mejor de las inicializaciones y 
+    //    (Opcional) Entrenamiento largo
+    // -------------------------------------
+    // El top_models[0] es el de mayor score
+    double best_score_local = top_models[0].first;
+    std::string best_model_path = top_models[0].second;
+
+    // Cargar el mejor modelo
+    FullyConnectedLayer best_layer(input_size, layerSize, optimizer);
+    best_layer.loadModel(best_model_path);
+
+    // Entrenamiento largo si es necesario
+    if (total_epochs_long > 0) {
+        size_t epochs_no_improve = 0;
+        double best_score_ever = best_score_local;
+        FullyConnectedLayer best_saved_layer = best_layer;
+        float best_saved_threshold = threshold;
+
+        for (size_t epoch = 0; epoch < total_epochs_long; ++epoch) {
+            std::cout << "[Bayes] Entrenamiento Largo - Época " 
+                      << (epoch+1) << "/" << total_epochs_long << "\n";
+
+            // Mezclar
+            train_positive_samples.shuffle();
+            train_negative_samples.shuffle();
+
+            // Combinar datos
+            std::vector<std::pair<std::reference_wrapper<const Eigen::VectorXf>, bool>> combined;
+            combined.reserve(train_positive_samples.getNumSamples() + train_negative_samples.getNumSamples());
+            for (size_t i = 0; i < train_positive_samples.getNumSamples(); ++i) {
+                combined.emplace_back(train_positive_samples.getSample(i), true);
+            }
+            for (size_t i = 0; i < train_negative_samples.getNumSamples(); ++i) {
+                combined.emplace_back(train_negative_samples.getSample(i), false);
+            }
+            {
+                std::random_device rd;
+                std::mt19937 g(rd());
+                std::shuffle(combined.begin(), combined.end(), g);
+            }
+
+            // Forward + training
+            for (size_t i = 0; i < combined.size(); ++i) {
+                bool is_pos = combined[i].second;
+                const Eigen::VectorXf& input_data = combined[i].first.get();
+                Eigen::VectorXf out;
+                best_layer.forward(input_data, out, true, is_pos, threshold, activation, activation_derivative);
+            }
+
+            // Evaluación en validación
+            size_t correct_pos = 0;
+            size_t correct_neg = 0;
+            std::vector<float> goodness_positive_vals;
+            std::vector<float> goodness_negative_vals;
+
+            // Positivos
+            for (size_t i = 0; i < val_positive_samples.getNumSamples(); ++i) {
+                Eigen::VectorXf out;
+                best_layer.forward(val_positive_samples.getSample(i), out, false, true, threshold, activation, activation_derivative);
+                float good = out.squaredNorm();
+                if (good > threshold) {
+                    correct_pos++;
+                }
+                goodness_positive_vals.push_back(good);
+            }
+
+            // Negativos
+            for (size_t i = 0; i < val_negative_samples.getNumSamples(); ++i) {
+                Eigen::VectorXf out;
+                best_layer.forward(val_negative_samples.getSample(i), out, false, false, threshold, activation, activation_derivative);
+                float good = out.squaredNorm();
+                if (good < threshold) {
+                    correct_neg++;
+                }
+                goodness_negative_vals.push_back(good);
+            }
+
+            // Cálculo de accuracy
+            double accuracy = 100.0 * (double)(correct_pos + correct_neg)
+                              / (val_positive_samples.getNumSamples() + val_negative_samples.getNumSamples());
+
+            std::cout << "   [Bayes] Acc. val: " << accuracy << "%\n";
+
+            if (accuracy > best_score_ever) {
+                best_score_ever = accuracy;
+                epochs_no_improve = 0;
+                best_saved_layer = best_layer;
+                best_saved_threshold = threshold;
+                std::cout << "   [Bayes] Nuevo mejor local: " << best_score_ever << "%\n";
+            } else {
+                epochs_no_improve++;
+            }
+
+            if (epochs_no_improve >= patience) {
+                std::cout << "   [Bayes] No hay mejora en " << patience 
+                          << " épocas. Revierto al mejor.\n";
+                best_layer = best_saved_layer;
+                threshold = best_saved_threshold;
+                epochs_no_improve = 0;
+                break;
+            }
+
+            // Ajuste dinámico de umbral si corresponde
+            if (dynamic_threshold &&
+                !goodness_positive_vals.empty() && !goodness_negative_vals.empty()) {
+                float avg_pos = std::accumulate(goodness_positive_vals.begin(), goodness_positive_vals.end(), 0.0f)
+                                / goodness_positive_vals.size();
+                float avg_neg = std::accumulate(goodness_negative_vals.begin(), goodness_negative_vals.end(), 0.0f)
+                                / goodness_negative_vals.size();
+                threshold = (avg_pos + avg_neg) * 0.5f;
+            }
+        } // Fin for epoch
+
+        // Al acabar, best_score_ever es la precisión final
+        best_score_local = best_score_ever;
+        best_layer = best_saved_layer;
+    } // Fin Entrenamiento largo
+
+    // 5) Retornar la precisión final en validación
+    std::cout << "[Bayes] *** Final accuracy del TRIAL = " << best_score_local << "% ***\n";
+    return best_score_local;
+}
+
+/**
+ * @brief Función que simula la búsqueda bayesiana de hiperparámetros
+ *        (realmente: random search) y guarda resultados en CSV.
+ */
+/**
+ * @brief Función que simula la búsqueda bayesiana de hiperparámetros
+ *        (realmente: random search) y guarda resultados en CSV.
+ */
+void runBayesianOptimization() {
+    try {
+        // Parámetros globales
+        size_t total_epochs_long;
+        std::cout << "Ingrese # total de epochs (entrenamiento largo): ";
+        std::cin >> total_epochs_long;
+
+        bool dynamic_threshold = false;
+        std::cout << "¿Desea umbral dinámico? (1=Sí,0=No): ";
+        int tmp;
+        std::cin >> tmp;
+        dynamic_threshold = (tmp == 1);
+
+        size_t num_init;
+        std::cout << "Ingrese # de inicializaciones: ";
+        std::cin >> num_init;
+
+        size_t init_epochs;
+        std::cout << "Ingrese # de epochs por inicialización: ";
+        std::cin >> init_epochs;
+
+        size_t ntop;
+        std::cout << "Ingrese # de mejores modelos a recordar (ntop): ";
+        std::cin >> ntop;
+
+        size_t patience;
+        std::cout << "Ingrese # de épocas de tolerancia (patience): ";
+        std::cin >> patience;
+
+        // Umbral base
+        float base_threshold;
+        std::cout << "Ingrese el umbral base: ";
+        std::cin >> base_threshold;
+
+        // Rango learning rate
+        float min_lr, max_lr;
+        std::cout << "Rango min de LR: ";
+        std::cin >> min_lr;
+        std::cout << "Rango max de LR: ";
+        std::cin >> max_lr;
+
+        // Rango momentum (para SGD)
+        float min_mom, max_mom;
+        std::cout << "Rango min de momentum: ";
+        std::cin >> min_mom;
+        std::cout << "Rango max de momentum: ";
+        std::cin >> max_mom;
+
+        // Rango alpha (para LowPassFilter)
+        float min_alpha, max_alpha;
+        std::cout << "Rango min de alpha: ";
+        std::cin >> min_alpha;
+        std::cout << "Rango max de alpha: ";
+        std::cin >> max_alpha;
+
+        int num_trials;
+        std::cout << "Ingrese el # de trials por cada tamaño de capa [16,32,64,128]: ";
+        std::cin >> num_trials;
+
+        // Cargar datasets
+        Dataset train_positive_samples("data/positive_images/train/");
+        Dataset val_positive_samples("data/positive_images/val/");
+        Dataset train_negative_samples("data/negative_images/train/");
+        Dataset val_negative_samples("data/negative_images/val/");
+
+        if (train_positive_samples.getNumSamples() == 0 ||
+            val_positive_samples.getNumSamples() == 0 ||
+            train_negative_samples.getNumSamples() == 0 ||
+            val_negative_samples.getNumSamples() == 0) {
+            throw std::runtime_error("Algún conjunto de datos (train o val) está vacío.");
+        }
+
+        fs::create_directories("results");
+        std::string csv_path = "results/bayes_results.csv";
+        std::ofstream csvFile(csv_path, std::ios::out);
+        if (!csvFile.is_open()) {
+            throw std::runtime_error("No se pudo crear " + csv_path);
+        }
+        // Escribir encabezados con valores predeterminados para parámetros irrelevantes
+        csvFile << "Optimizer,LayerSize,LR,Momentum,Alpha,BaseThreshold,DynamicThreshold,Accuracy\n";
+
+        // Lista de tamaños de capa
+        std::vector<size_t> layerSizes = {16, 32, 64};
+
+        // Lista de optimizadores a intercalar
+        std::vector<std::string> optimizer_names = {"SGD", "LowPassFilter"};
+        size_t optimizer_count = optimizer_names.size();
+
+        // Iterar sobre cada tamaño de capa
+        for (auto layerSize : layerSizes) {
+            // Ajustar umbral en función del tamaño de capa
+            float scaled_threshold = base_threshold;
+            if (layerSize == 32) {
+                scaled_threshold = base_threshold * 2.0f; 
+            } else if (layerSize == 64) {
+                scaled_threshold = base_threshold * 4.0f; 
+            } else if (layerSize == 128) {
+                scaled_threshold = base_threshold * 8.0f; 
+            }
+
+            // Para cada trial
+            for (int t = 0; t < num_trials; ++t) {
+                std::cout << "\n=== Trial " << (t+1) << " para LayerSize=" << layerSize << " ===\n";
+
+                // Seleccionar optimizador intercalado
+                std::string optName = optimizer_names[t % optimizer_count];
+                std::shared_ptr<Optimizer> trial_optimizer;
+                float trial_lr = randomFloatInRange(min_lr, max_lr);
+                float trial_mom = 0.0f;   // Valor predeterminado para optimizadores que no lo usan
+                float trial_alpha = 0.0f; // Valor predeterminado para optimizadores que no lo usan
+
+                if (optName == "SGD") {
+                    trial_mom = randomFloatInRange(min_mom, max_mom);
+                    trial_optimizer = std::make_shared<SGDOptimizer>(trial_lr, trial_mom);
+                }
+                else if (optName == "Adam") {
+                    // Para simplificar, se asignan valores predeterminados a parámetros de Adam
+                    float beta1 = 0.9f;
+                    float beta2 = 0.999f;
+                    float epsilon = 1e-8f;
+                    trial_optimizer = std::make_shared<AdamOptimizer>(trial_lr, beta1, beta2, epsilon);
+                }
+                else if (optName == "LowPassFilter") {
+                    trial_alpha = randomFloatInRange(min_alpha, max_alpha);
+                    trial_optimizer = std::make_shared<LowPassFilterOptimizer>(trial_lr, trial_alpha);
+                }
+                else if (optName == "AdaBelief") {
+                    // Para simplificar, se asignan valores predeterminados a parámetros de AdaBelief
+                    float beta1 = 0.9f;
+                    float beta2 = 0.999f;
+                    float epsilon = 1e-8f;
+                    trial_optimizer = std::make_shared<AdaBeliefOptimizer>(trial_lr, beta1, beta2, epsilon);
+                }
+                else {
+                    throw std::runtime_error("Optimizador desconocido: " + optName);
+                }
+
+                std::cout << "[Trial " << (t+1) << "] Optimizer: " << optName
+                          << ", LR: " << trial_lr;
+
+                if (optName == "SGD") {
+                    std::cout << ", Momentum: " << trial_mom;
+                }
+                else if (optName == "LowPassFilter") {
+                    std::cout << ", Alpha: " << trial_alpha;
+                }
+
+                std::cout << "\n";
+
+                // Entrenar y evaluar el modelo
+                double accuracy = trainAndEvaluateBayes(
+                    train_positive_samples,
+                    val_positive_samples,
+                    train_negative_samples,
+                    val_negative_samples,
+                    trial_optimizer,
+                    layerSize,
+                    scaled_threshold,
+                    dynamic_threshold,
+                    num_init,
+                    init_epochs,
+                    ntop,
+                    patience,
+                    total_epochs_long
+                );
+
+                // Guardar en CSV con manejo de parámetros irrelevantes
+                csvFile << optName << ","
+                        << layerSize << ","
+                        << trial_lr << ",";
+
+                if (optName == "SGD") {
+                    csvFile << trial_mom << "," << "N/A" << ",";
+                }
+                else if (optName == "LowPassFilter") {
+                    csvFile << "N/A" << "," << trial_alpha << ",";
+                }
+                else { // Adam y AdaBelief
+                    csvFile << "N/A" << "," << "N/A" << ",";
+                }
+
+                csvFile << base_threshold << ","
+                        << (dynamic_threshold ? 1 : 0) << ","
+                        << accuracy << "\n";
+
+                std::cout << "[Trial " << (t+1) << "] Accuracy: " << accuracy << "%\n";
+            }
+        }
+        csvFile.close();
+        std::cout << "Resultados guardados en: " << csv_path << "\n";
+    } catch (const std::exception& ex) {
+        std::cerr << "Error durante la optimización bayesiana: " << ex.what() << "\n";
+    }
+}
+
+
+
+// =================================
 // Función principal del programa
+// =================================
 int main() {
-    trainModel();
+    // Configurar número de hilos
+    Eigen::setNbThreads(std::thread::hardware_concurrency());
+
+    std::cout << "Seleccione el modo:\n";
+    std::cout << "1) Entrenamiento normal\n";
+    std::cout << "2) Busqueda Bayesiana Hiperparametros (simulada)\n";
+    int mode;
+    std::cin >> mode;
+
+    if (mode == 1) {
+        trainModel();
+    } else if (mode == 2) {
+        runBayesianOptimization();
+    } else {
+        std::cout << "Opción inválida.\n";
+    }
+
     return 0;
 }

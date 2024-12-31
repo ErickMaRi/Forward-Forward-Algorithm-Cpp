@@ -57,11 +57,11 @@ class FullyConnectedLayer {
 public:
     // Constructores
     FullyConnectedLayer(size_t input_size, size_t output_size,
-                        std::shared_ptr<Optimizer> optimizer_ptr);
-    FullyConnectedLayer(const FullyConnectedLayer& other) = default;
-    FullyConnectedLayer& operator=(const FullyConnectedLayer& other) = default;
-    FullyConnectedLayer(FullyConnectedLayer&& other) noexcept = default;
-    FullyConnectedLayer& operator=(FullyConnectedLayer&& other) noexcept = default;
+                        std::shared_ptr<Optimizer> optimizer_ptr); // Constructor por parámetros
+    FullyConnectedLayer(const FullyConnectedLayer& other) = default; // Constructor de copia
+    FullyConnectedLayer& operator=(const FullyConnectedLayer& other) = default; // Constructor asignador
+    FullyConnectedLayer(FullyConnectedLayer&& other) noexcept = default; // Constructor de movimiento
+    FullyConnectedLayer& operator=(FullyConnectedLayer&& other) noexcept = default; // Asignación por movimiento
 
     /**
      * @brief Realiza la propagación hacia adelante en la capa completamente conectada.

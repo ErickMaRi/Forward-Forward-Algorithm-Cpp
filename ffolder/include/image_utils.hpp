@@ -6,7 +6,7 @@
 #include <string>
 #include <opencv2/opencv.hpp>
 
-// Declaraciones actualizadas con el parámetro num_channels y su valor predeterminado
+// Declaramos los dos métodos para generar los datos sintéticos
 void generatePositiveImages(const std::string& directory, 
                            int num_images, 
                            cv::Size image_size, 

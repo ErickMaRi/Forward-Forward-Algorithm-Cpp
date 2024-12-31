@@ -1,5 +1,3 @@
-# Makefile
-
 CXX = g++
 
 # Detectar automáticamente si se necesita -lstdc++fs basado en la versión de GCC
