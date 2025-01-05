@@ -1,6 +1,10 @@
+// /src/optimizer.cpp
+
 #include "optimizer.hpp"
-#include <cmath>
+#include <iostream>
+#include <memory>
 #include <stdexcept>
+
 
 /* ===============================================================
  *        1) SGDOptimizer (con momento opcional)
@@ -202,4 +206,66 @@ void AdaBeliefOptimizer::updateBiases(Eigen::VectorXf& biases,
 
     // Actualizar biases
     biases.array() -= lr * m_hat.array() / (v_hat.array().sqrt() + eps);
+}
+
+std::shared_ptr<Optimizer> selectOptimizer() {
+    int optimizer_choice;
+    std::cout << "\nSeleccione el optimizador:\n";
+    std::cout << "1. SGD Optimizer\n";
+    std::cout << "2. Adam Optimizer\n";
+    std::cout << "3. Low Pass Filter Optimizer\n";
+    std::cout << "4. AdaBelief Optimizer\n";
+    std::cout << "Ingrese su elección: ";
+    std::cin >> optimizer_choice;
+
+    switch (optimizer_choice) {
+        case 1: {
+            float learning_rate, momentum;
+            std::cout << "Ingrese el learning rate para SGD Optimizer (ej. 0.0001): ";
+            std::cin >> learning_rate;
+            std::cout << "Ingrese el valor de momentum (ej. 0.9 o 0): ";
+            std::cin >> momentum;
+
+            return std::make_shared<SGDOptimizer>(learning_rate, momentum);
+        }
+        case 2: {
+            float learning_rate, beta1, beta2, epsilon;
+            std::cout << "Ingrese el learning rate para Adam Optimizer (ej. 0.0001): ";
+            std::cin >> learning_rate;
+            std::cout << "Ingrese beta1 (ej. 0.9): ";
+            std::cin >> beta1;
+            std::cout << "Ingrese beta2 (ej. 0.999): ";
+            std::cin >> beta2;
+            std::cout << "Ingrese epsilon (ej. 1e-8): ";
+            std::cin >> epsilon;
+
+            return std::make_shared<AdamOptimizer>(learning_rate, beta1, beta2, epsilon);
+        }
+        case 3: {
+            float learning_rate, alpha;
+            std::cout << "Ingrese el learning rate para Low Pass Filter Optimizer (ej. 0.0001): ";
+            std::cin >> learning_rate;
+            std::cout << "Ingrese el valor de alpha (ej. 0.1): ";
+            std::cin >> alpha;
+
+            return std::make_shared<LowPassFilterOptimizer>(learning_rate, alpha);
+        }
+        case 4: {
+            float learning_rate, beta1, beta2, epsilon;
+            std::cout << "Ingrese el learning rate para AdaBelief Optimizer (ej. 0.0001): ";
+            std::cin >> learning_rate;
+            std::cout << "Ingrese beta1 (ej. 0.9): ";
+            std::cin >> beta1;
+            std::cout << "Ingrese beta2 (ej. 0.999): ";
+            std::cin >> beta2;
+            std::cout << "Ingrese epsilon (ej. 1e-8): ";
+            std::cin >> epsilon;
+
+            return std::make_shared<AdaBeliefOptimizer>(learning_rate, beta1, beta2, epsilon);
+        }
+        default: {
+            std::cout << "Opción inválida. Usando Adam Optimizer con valores por defecto.\n";
+            return std::make_shared<AdamOptimizer>();
+        }
+    }
 }

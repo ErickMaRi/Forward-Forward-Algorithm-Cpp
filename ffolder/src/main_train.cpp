@@ -1,523 +1,30 @@
-//src/main_train.cpp
+// /src/main_train.cpp
 
 #define EIGEN_USE_THREADS
 #include "neural_network.hpp"
 #include "optimizer.hpp"
 #include "scatter_plot_data.hpp"
+#include "plotting.hpp"
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <thread> 
-#include <opencv2/opencv.hpp>
 #include <iostream>
 #include <random>
 #include <filesystem>
 #include <vector>
 #include <algorithm>
 #include <numeric>
-#include <functional>
 #include <cmath>
 #include <memory>
 #include <stdexcept>
-#include <omp.h>
+// #include <omp.h>
 #include <fstream>
 
 namespace fs = std::filesystem;
 
 // ================================
-// Funciones Auxiliares y Principal
+// Métodos para el entrenamiento
 // ================================
-
-// Definir la función de activación y su derivada (Leaky ReLU) correctamente
-std::function<float(float)> activation = [](float x) -> float {
-    const float alpha = 1.0f / 64.0f; // 2^-6
-    return (x >= 0.0f) ? x : alpha * x; // Leaky ReLU
-};
-
-std::function<float(float)> activation_derivative = [](float x) -> float {
-    const float alpha = 1.0f / 64.0f; // 2^-6
-    return (x >= 0.0f) ? 1.0f : alpha; // Derivada de Leaky ReLU
-};
-
-/**
- * @brief Genera una permutación fija para los datos de entrada.
- * @param input_size Tamaño del vector de entrada.
- * @return Vector que representa la permutación.
- */
-std::vector<size_t> generateFixedPermutation(size_t input_size) {
-    std::vector<size_t> permutation(input_size);
-    std::iota(permutation.begin(), permutation.end(), 0); // Inicializa con 0, 1, 2, ..., input_size-1
-
-    // Utiliza un generador con semilla fija para reproducibilidad
-    std::mt19937 rng(42); // Semilla fija
-    std::shuffle(permutation.begin(), permutation.end(), rng);
-
-    return permutation;
-}
-
-/**
- * @brief Aplica una permutación fija a una imagen.
- * @param image Vector de entrada que representa la imagen.
- * @param permutation Vector que define la permutación de los índices.
- * @return Vector permutado.
- */
-Eigen::VectorXf applyPermutation(const Eigen::VectorXf& image, const std::vector<size_t>& permutation) {
-    Eigen::VectorXf permuted_image(image.size());
-    for (size_t i = 0; i < permutation.size(); ++i) {
-        permuted_image[i] = image[permutation[i]];
-    }
-    return permuted_image;
-}
-
-/**
- * @brief Permite al usuario seleccionar un optimizador.
- * @return Puntero compartido al optimizador seleccionado.
- */
-std::shared_ptr<Optimizer> selectOptimizer() {
-    int optimizer_choice;
-    std::cout << "\nSeleccione el optimizador:\n";
-    std::cout << "1. SGD Optimizer\n";
-    std::cout << "2. Adam Optimizer\n";
-    std::cout << "3. Low Pass Filter Optimizer\n";
-    std::cout << "4. AdaBelief Optimizer\n";
-    std::cout << "Ingrese su elección: ";
-    std::cin >> optimizer_choice;
-
-    switch (optimizer_choice) {
-        case 1: {
-            float learning_rate, momentum;
-
-            std::cout << "Ingrese el learning rate para SGD Optimizer (ej. 0.0001): ";
-            std::cin >> learning_rate;
-            std::cout << "Ingrese el valor de momentum (ej. 0.9 o 0): ";
-            std::cin >> momentum;
-
-            return std::make_shared<SGDOptimizer>(learning_rate, momentum);
-        }
-        case 2: {
-            float learning_rate, beta1, beta2, epsilon;
-
-            std::cout << "Ingrese el learning rate para Adam Optimizer (ej. 0.0001): ";
-            std::cin >> learning_rate;
-
-            std::cout << "Ingrese beta1 (ej. 0.9): ";
-            std::cin >> beta1;
-            std::cout << "Ingrese beta2 (ej. 0.999): ";
-            std::cin >> beta2;
-            std::cout << "Ingrese epsilon (ej. 1e-8): ";
-            std::cin >> epsilon;
-
-            return std::make_shared<AdamOptimizer>(learning_rate, beta1, beta2, epsilon);
-        }
-        case 3: {
-            float learning_rate, alpha;
-
-            std::cout << "Ingrese el learning rate para Low Pass Filter Optimizer (ej. 0.0001): ";
-            std::cin >> learning_rate;
-            std::cout << "Ingrese el valor de alpha (ej. 0.1): ";
-            std::cin >> alpha;
-
-            return std::make_shared<LowPassFilterOptimizer>(learning_rate, alpha);
-        }
-        case 4: {
-            float learning_rate, beta1, beta2, epsilon;
-
-            std::cout << "Ingrese el learning rate para AdaBelief Optimizer (ej. 0.0001): ";
-            std::cin >> learning_rate;
-            std::cout << "Ingrese beta1 (ej. 0.9): ";
-            std::cin >> beta1;
-            std::cout << "Ingrese beta2 (ej. 0.999): ";
-            std::cin >> beta2;
-            std::cout << "Ingrese epsilon (ej. 1e-8): ";
-            std::cin >> epsilon;
-
-            return std::make_shared<AdaBeliefOptimizer>(learning_rate, beta1, beta2, epsilon);
-        }
-        default: {
-            std::cout << "Opción inválida. Usando Adam Optimizer con valores por defecto.\n";
-            return std::make_shared<AdamOptimizer>();
-        }
-    }
-}
-
-
-// ================================
-// Funciones para Visualización
-// ================================
-
-/**
- * @brief Visualiza los datos usando PCA.
- */
-void visualizePCA(FullyConnectedLayer& layer, Dataset& val_positive_samples,
-                  Dataset& val_negative_samples, int num_components,
-                  float threshold) {
-    // Verificar que num_components sea 2 o 3
-    if (num_components != 2 && num_components != 3) {
-        throw std::invalid_argument("El número de componentes debe ser 2 o 3.");
-    }
-
-    size_t val_positive_size = val_positive_samples.getNumSamples();
-    size_t val_negative_size = val_negative_samples.getNumSamples();
-    size_t total_samples = val_positive_size + val_negative_size;
-
-    size_t output_size = layer.getOutputSize();
-
-    // Crear matriz para almacenar las salidas
-    cv::Mat data(total_samples, output_size, CV_32F);
-    std::vector<int> labels(total_samples);
-    std::vector<std::string> image_paths(total_samples);
-    std::vector<float> squared_magnitudes(total_samples);
-
-    // Vectores para las magnitudes al cuadrado de cada conjunto
-    std::vector<float> squared_magnitudes_positive;
-    std::vector<float> squared_magnitudes_negative;
-
-    // Recopilar salidas para muestras positivas
-    size_t idx = 0;
-    for (size_t i = 0; i < val_positive_size; ++i, ++idx) {
-        const Eigen::VectorXf& input = val_positive_samples.getSample(i);
-        Eigen::VectorXf output;
-        layer.forward(input, output, false, true, threshold,
-                      activation, activation_derivative);
-
-        // Copiar la salida a la matriz de datos
-        for (size_t j = 0; j < output_size; ++j) {
-            data.at<float>(idx, j) = output[j];
-        }
-        labels[idx] = 1; // Positivo
-        image_paths[idx] = val_positive_samples.getImagePath(i);
-
-        // Calcular y almacenar la magnitud al cuadrado
-        float squared_magnitude = output.squaredNorm();
-        squared_magnitudes[idx] = squared_magnitude;
-        squared_magnitudes_positive.push_back(squared_magnitude);
-    }
-
-    // Recopilar salidas para muestras negativas
-    for (size_t i = 0; i < val_negative_size; ++i, ++idx) {
-        const Eigen::VectorXf& input = val_negative_samples.getSample(i);
-        Eigen::VectorXf output;
-        layer.forward(input, output, false, false, threshold,
-                      activation, activation_derivative);
-
-        // Copiar la salida a la matriz de datos
-        for (size_t j = 0; j < output_size; ++j) {
-            data.at<float>(idx, j) = output[j];
-        }
-        labels[idx] = 0; // Negativo
-        image_paths[idx] = val_negative_samples.getImagePath(i);
-
-        // Calcular y almacenar la magnitud al cuadrado
-        float squared_magnitude = output.squaredNorm();
-        squared_magnitudes[idx] = squared_magnitude;
-        squared_magnitudes_negative.push_back(squared_magnitude);
-    }
-
-    // Realizar PCA
-    cv::PCA pca(data, cv::Mat(), cv::PCA::DATA_AS_ROW, num_components);
-
-    // Proyectar datos
-    cv::Mat projected_data = pca.project(data);
-
-    // Encontrar mínimos y máximos para el escalado de las coordenadas PCA
-    cv::Mat min_vals, max_vals;
-    cv::reduce(projected_data, min_vals, 0, cv::REDUCE_MIN);
-    cv::reduce(projected_data, max_vals, 0, cv::REDUCE_MAX);
-
-    // Encontrar mínimos y máximos de las magnitudes al cuadrado para cada conjunto
-    float min_squared_magnitude_positive = *std::min_element(squared_magnitudes_positive.begin(), squared_magnitudes_positive.end());
-    float max_squared_magnitude_positive = *std::max_element(squared_magnitudes_positive.begin(), squared_magnitudes_positive.end());
-
-    float min_squared_magnitude_negative = *std::min_element(squared_magnitudes_negative.begin(), squared_magnitudes_negative.end());
-    float max_squared_magnitude_negative = *std::max_element(squared_magnitudes_negative.begin(), squared_magnitudes_negative.end());
-
-    // Crear imagen para el scatter plot
-    int img_size = 600;
-    cv::Mat scatter_image(img_size, img_size, CV_8UC3,
-                          cv::Scalar(255, 255, 255));
-
-    // Función para mapear coordenadas PCA a píxeles
-    auto mapToPixel = [&](float val, float min_val, float max_val) {
-        return static_cast<int>((val - min_val) / (max_val - min_val) *
-                                (img_size - 40) + 20);
-    };
-
-    ScatterPlotData plot_data;
-    plot_data.image = scatter_image.clone();
-
-    // Dibujar puntos
-    for (size_t i = 0; i < total_samples; ++i) {
-        int x = mapToPixel(projected_data.at<float>(i, 0),
-                           min_vals.at<float>(0, 0),
-                           max_vals.at<float>(0, 0));
-        int y = mapToPixel(projected_data.at<float>(i, 1),
-                           min_vals.at<float>(0, 1),
-                           max_vals.at<float>(0, 1));
-
-        // Invertir y para que el origen esté en la parte inferior
-        y = img_size - y;
-
-        cv::Point pt(x, y);
-        plot_data.points.push_back(pt);
-        plot_data.image_paths.push_back(image_paths[i]);
-
-        // Mapear la magnitud al cuadrado al rango [0, 255] para el canal verde
-        float normalized_value;
-        int green_value;
-        if (labels[i] == 1) {
-            // Muestras positivas
-            normalized_value = (squared_magnitudes[i] - min_squared_magnitude_positive) /
-                               (max_squared_magnitude_positive - min_squared_magnitude_positive);
-        } else {
-            // Muestras negativas
-            normalized_value = (squared_magnitudes[i] - min_squared_magnitude_negative) /
-                               (max_squared_magnitude_negative - min_squared_magnitude_negative);
-        }
-
-        // Asegurarse de que el valor esté entre 0 y 1
-        normalized_value = std::max(0.0f, std::min(1.0f, normalized_value));
-
-        green_value = static_cast<int>(normalized_value * 255.0f);
-
-        // Establecer color según la etiqueta y la magnitud
-        cv::Scalar color;
-        if (labels[i] == 1) {
-            // Rojo y canal verde para la magnitud
-            color = cv::Scalar(0, green_value, 255);
-        } else {
-            // Azul y canal verde para la magnitud
-            color = cv::Scalar(255, green_value, 0);
-        }
-
-        cv::circle(plot_data.image, pt, 4, color, -1);
-    }
-
-    // Dibujar el origen (0,0)
-    cv::Point origin(
-        mapToPixel(0.0f, min_vals.at<float>(0, 0), max_vals.at<float>(0, 0)),
-        img_size - mapToPixel(0.0f, min_vals.at<float>(0, 1),
-                              max_vals.at<float>(0, 1))
-    );
-    cv::drawMarker(plot_data.image, origin, cv::Scalar(0, 0, 0),
-                   cv::MARKER_CROSS, 20, 2);
-
-    // Mostrar la imagen
-    cv::namedWindow("Scatter Plot", cv::WINDOW_AUTOSIZE);
-
-    // Función de callback para manejar los clics del mouse
-    cv::setMouseCallback("Scatter Plot", [](int event, int x, int y,
-                                            int flags, void* userdata) {
-        if (event != cv::EVENT_LBUTTONDOWN) return;
-
-        ScatterPlotData* plot_data = reinterpret_cast<ScatterPlotData*>(
-                                     userdata);
-        cv::Point click_point(x, y);
-
-        // Encontrar el punto más cercano
-        double min_dist = std::numeric_limits<double>::max();
-        size_t closest_idx = 0;
-
-        for (size_t i = 0; i < plot_data->points.size(); ++i) {
-            double dist = cv::norm(click_point - plot_data->points[i]);
-            if (dist < min_dist) {
-                min_dist = dist;
-                closest_idx = i;
-            }
-        }
-
-        // Si el clic está cerca de un punto
-        if (min_dist <= 10.0) {
-            // Cargar y mostrar la imagen correspondiente
-            cv::Mat img = cv::imread(plot_data->image_paths[closest_idx]);
-            if (!img.empty()) {
-                cv::imshow("Imagen Seleccionada", img);
-            } else {
-                std::cerr << "No se pudo cargar la imagen: "
-                          << plot_data->image_paths[closest_idx] << "\n";
-            }
-        }
-    }, &plot_data);
-
-    cv::imshow("Scatter Plot", plot_data.image);
-    cv::waitKey(0);
-}
-
-/**
- * @brief Función para plotear histogramas combinados.
- */
-void plotGoodnessHistogramsCombined(const std::vector<float>& goodness_positive_vals,
-                                    const std::vector<float>& goodness_negative_vals,
-                                    float threshold,
-                                    const std::string& save_file) { // Renombrado a 'save_file'
-    // Convertir los vectores a Mat de OpenCV
-    cv::Mat goodness_positive = cv::Mat(goodness_positive_vals).reshape(1);
-    cv::Mat goodness_negative = cv::Mat(goodness_negative_vals).reshape(1);
-
-    // Definir los parámetros del histograma
-    int histSize = 50; // Número de bins
-    float max_val = std::max(*std::max_element(
-                             goodness_positive_vals.begin(),
-                             goodness_positive_vals.end()),
-                             *std::max_element(
-                             goodness_negative_vals.begin(),
-                             goodness_negative_vals.end()));
-    float range[] = { 0.0f, max_val };
-    const float* histRange = { range };
-    bool uniform = true;
-    bool accumulate = false;
-
-    // Calcular los histogramas
-    cv::Mat hist_positive, hist_negative;
-    cv::calcHist(&goodness_positive, 1, 0, cv::Mat(), hist_positive, 1,
-                &histSize, &histRange, uniform, accumulate);
-    cv::calcHist(&goodness_negative, 1, 0, cv::Mat(), hist_negative, 1,
-                &histSize, &histRange, uniform, accumulate);
-
-    // Normalizar los histogramas
-    cv::normalize(hist_positive, hist_positive, 0, 400, cv::NORM_MINMAX);
-    cv::normalize(hist_negative, hist_negative, 0, 400, cv::NORM_MINMAX);
-
-    // Crear la imagen para el histograma combinado
-    int hist_w = 512;
-    int hist_h = 400;
-    int bin_w = cvRound((double)hist_w / histSize);
-
-    cv::Mat histImageCombined(hist_h, hist_w, CV_8UC3, cv::Scalar(255, 255, 255));
-
-    // Dibujar el histograma positivo en azul
-    for (int i = 1; i < histSize; i++) {
-        cv::line(histImageCombined,
-            cv::Point(bin_w * (i - 1), hist_h - cvRound(hist_positive.at<float>(i - 1))),
-            cv::Point(bin_w * i, hist_h - cvRound(hist_positive.at<float>(i))),
-            cv::Scalar(255, 0, 0), 2); // Azul para positivos
-    }
-
-    // Dibujar el histograma negativo en verde
-    for (int i = 1; i < histSize; i++) {
-        cv::line(histImageCombined,
-            cv::Point(bin_w * (i - 1), hist_h - cvRound(hist_negative.at<float>(i - 1))),
-            cv::Point(bin_w * i, hist_h - cvRound(hist_negative.at<float>(i))),
-            cv::Scalar(0, 255, 0), 2); // Verde para negativos
-    }
-
-    // Dibujar la línea del umbral
-    float normalized_threshold = (threshold - range[0]) / (range[1] - range[0]);
-    int threshold_x = cvRound(normalized_threshold * hist_w);
-    cv::line(histImageCombined,
-             cv::Point(threshold_x, 0),
-             cv::Point(threshold_x, hist_h),
-             cv::Scalar(0, 0, 0), 2); // Línea negra para el umbral
-
-    // Añadir leyenda
-    int font = cv::FONT_HERSHEY_SIMPLEX;
-    double font_scale = 1.0;
-    int thickness = 2;
-    cv::putText(histImageCombined, "Positivos", cv::Point(20, 30),
-                font, font_scale, cv::Scalar(255, 0, 0), thickness); // Azul
-    cv::putText(histImageCombined, "Negativos", cv::Point(20, 70),
-                font, font_scale, cv::Scalar(0, 255, 0), thickness); // Verde
-    cv::putText(histImageCombined, "Umbral", cv::Point(threshold_x + 10, 20),
-                font, font_scale, cv::Scalar(0, 0, 0), thickness); // Negro
-
-    // Extraer la carpeta de la ruta del archivo
-    fs::path p(save_file);
-    fs::create_directories(p.parent_path());
-
-    // Guardar la imagen combinada
-    cv::imwrite(save_file, histImageCombined);
-}
-
-/**
- * @brief Función para plotear histogramas separados (si es necesario).
- */
-void plotGoodnessHistograms(const std::vector<float>& goodness_positive_vals,
-                            const std::vector<float>& goodness_negative_vals,
-                            float threshold,
-                            const std::string& save_path) { // Añadido 'save_path'
-    // Convertir los vectores a Mat de OpenCV
-    cv::Mat goodness_positive = cv::Mat(goodness_positive_vals).reshape(1);
-    cv::Mat goodness_negative = cv::Mat(goodness_negative_vals).reshape(1);
-
-    // Definir los parámetros del histograma
-    int histSize = 50; // Número de bins
-    float max_val = std::max(*std::max_element(
-                             goodness_positive_vals.begin(),
-                             goodness_positive_vals.end()),
-                             *std::max_element(
-                             goodness_negative_vals.begin(),
-                             goodness_negative_vals.end()));
-    float range[] = { 0.0f, max_val }; // Ajustar el rango máximo
-    const float* histRange = { range };
-    bool uniform = true;
-    bool accumulate = false;
-
-    // Calcular los histogramas
-    cv::Mat hist_positive, hist_negative;
-    cv::calcHist(&goodness_positive, 1, 0, cv::Mat(), hist_positive, 1,
-                 &histSize, &histRange, uniform, accumulate);
-    cv::calcHist(&goodness_negative, 1, 0, cv::Mat(), hist_negative, 1,
-                 &histSize, &histRange, uniform, accumulate);
-
-    // Normalizar los histogramas
-    cv::normalize(hist_positive, hist_positive, 0, 400, cv::NORM_MINMAX);
-    cv::normalize(hist_negative, hist_negative, 0, 400, cv::NORM_MINMAX);
-
-    // Crear las imágenes para los histogramas
-    int hist_w = 512;
-    int hist_h = 400;
-    int bin_w = cvRound((double)hist_w / histSize);
-
-    cv::Mat histImagePositive(hist_h, hist_w, CV_8UC3,
-                              cv::Scalar(255, 255, 255));
-    cv::Mat histImageNegative(hist_h, hist_w, CV_8UC3,
-                              cv::Scalar(255, 255, 255));
-
-    // Dibujar los histogramas
-    for (int i = 1; i < histSize; i++) {
-        // Histograma positivo
-        cv::line(histImagePositive,
-            cv::Point(bin_w * (i - 1), hist_h -
-                      cvRound(hist_positive.at<float>(i - 1))),
-            cv::Point(bin_w * (i), hist_h -
-                      cvRound(hist_positive.at<float>(i))),
-            cv::Scalar(255, 0, 0), 2);
-
-        // Histograma negativo
-        cv::line(histImageNegative,
-            cv::Point(bin_w * (i - 1), hist_h -
-                      cvRound(hist_negative.at<float>(i - 1))),
-            cv::Point(bin_w * (i), hist_h -
-                      cvRound(hist_negative.at<float>(i))),
-            cv::Scalar(0, 255, 0), 2);
-    }
-
-    // Dibujar la línea del umbral
-    float normalized_threshold = (threshold - range[0]) / (range[1] - range[0]);
-    int threshold_x = cvRound(normalized_threshold * hist_w);
-    cv::line(histImagePositive,
-             cv::Point(threshold_x, 0),
-             cv::Point(threshold_x, hist_h),
-             cv::Scalar(0, 0, 0), 2);
-
-    cv::line(histImageNegative,
-             cv::Point(threshold_x, 0),
-             cv::Point(threshold_x, hist_h),
-             cv::Scalar(0, 0, 0), 2);
-
-    // Añadir texto a las imágenes
-    cv::putText(histImagePositive, "Positivos", cv::Point(20, 30),
-                cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 0, 0), 2);
-    cv::putText(histImageNegative, "Negativos", cv::Point(20, 30),
-                cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 0, 0), 2);
-
-    // Crear la carpeta de destino si no existe
-    fs::create_directories(save_path);
-
-    // Guardar las imágenes
-    std::string pos_hist_path = save_path + "/Histograma_Positive.png";
-    std::string neg_hist_path = save_path + "/Histograma_Negative.png";
-    cv::imwrite(pos_hist_path, histImagePositive);
-    cv::imwrite(neg_hist_path, histImageNegative);
-}
 
 /**
  * @brief Función principal que maneja el flujo de entrenamiento del modelo.
@@ -540,7 +47,6 @@ void trainModel() {
         }
 
         size_t input_size = train_positive_samples.getInputSize(); // Asegúrate de que esto corresponde al tamaño de cada imagen
-        std::vector<size_t> permutation = generateFixedPermutation(input_size);
 
         std::shared_ptr<Optimizer> optimizer = selectOptimizer();
 
@@ -621,8 +127,7 @@ void trainModel() {
 
                 // Barajar la lista combinada
                 {
-                    std::random_device rd;
-                    std::mt19937 g(rd());
+                    static std::mt19937 g(std::random_device{}());
                     std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
                 }
 
@@ -997,8 +502,7 @@ void trainModel() {
 
             // Barajar la lista combinada
             {
-                std::random_device rd;
-                std::mt19937 g(rd());
+                static std::mt19937 g(std::random_device{}());
                 std::shuffle(combined_train_samples.begin(), combined_train_samples.end(), g);
             }
 
@@ -1125,7 +629,6 @@ void trainModel() {
         // Establecer la capa y umbral al mejor encontrado durante el entrenamiento largo
         FullyConnectedLayer final_layer = best_overall_layer;
         threshold = best_overall_threshold; // Usamos el mejor umbral encontrado
-        double final_best_score = best_score;
 
         // Solicita al usuario la ruta para guardar el modelo final
         std::string model_path;
@@ -1477,10 +980,6 @@ double trainAndEvaluateBayes(Dataset& train_positive_samples,
  * @brief Función que simula la búsqueda bayesiana de hiperparámetros
  *        (realmente: random search) y guarda resultados en CSV.
  */
-/**
- * @brief Función que simula la búsqueda bayesiana de hiperparámetros
- *        (realmente: random search) y guarda resultados en CSV.
- */
 void runBayesianOptimization() {
     try {
         // Parámetros globales
@@ -1555,13 +1054,13 @@ void runBayesianOptimization() {
 
         fs::create_directories("results");
         std::string csv_path = "results/bayes_results.csv";
-        std::ofstream csvFile(csv_path, std::ios::out);
+        std::ofstream csvFile(csv_path, std::ios::app);
         if (!csvFile.is_open()) {
             throw std::runtime_error("No se pudo crear " + csv_path);
         }
         // Escribir encabezados con valores predeterminados para parámetros irrelevantes
         csvFile << "Optimizer,LayerSize,LR,Momentum,Alpha,BaseThreshold,DynamicThreshold,Accuracy\n";
-
+        csvFile.flush();
         // Lista de tamaños de capa
         std::vector<size_t> layerSizes = {16, 32, 64};
 
@@ -1571,15 +1070,9 @@ void runBayesianOptimization() {
 
         // Iterar sobre cada tamaño de capa
         for (auto layerSize : layerSizes) {
-            // Ajustar umbral en función del tamaño de capa
-            float scaled_threshold = base_threshold;
-            if (layerSize == 32) {
-                scaled_threshold = base_threshold * 2.0f; 
-            } else if (layerSize == 64) {
-                scaled_threshold = base_threshold * 4.0f; 
-            } else if (layerSize == 128) {
-                scaled_threshold = base_threshold * 8.0f; 
-            }
+            // Ajustar umbral proporcionalmente al tamaño de la capa
+            float scaled_threshold = base_threshold * (static_cast<float>(layerSize) / 16.0f);
+            std::cout << "\nLayer Size: " << layerSize << ", Scaled Threshold: " << scaled_threshold << "\n";
 
             // Para cada trial
             for (int t = 0; t < num_trials; ++t) {
@@ -1618,7 +1111,7 @@ void runBayesianOptimization() {
                     throw std::runtime_error("Optimizador desconocido: " + optName);
                 }
 
-                std::cout << "[Trial " << (t+1) << "] Optimizer: " << optName
+                std::cout << "[Trial " << (t+1) << "] Optimizer:     " << optName
                           << ", LR: " << trial_lr;
 
                 if (optName == "SGD") {
@@ -1676,8 +1169,6 @@ void runBayesianOptimization() {
     }
 }
 
-
-
 // =================================
 // Función principal del programa
 // =================================
@@ -1687,7 +1178,7 @@ int main() {
 
     std::cout << "Seleccione el modo:\n";
     std::cout << "1) Entrenamiento normal\n";
-    std::cout << "2) Busqueda Bayesiana Hiperparametros (simulada)\n";
+    std::cout << "2) Busqueda Hiperparametros\n";
     int mode;
     std::cin >> mode;
 

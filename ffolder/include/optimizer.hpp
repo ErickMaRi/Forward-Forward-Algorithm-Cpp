@@ -2,6 +2,7 @@
 #define OPTIMIZER_HPP
 
 #include <Eigen/Dense>
+#include <memory>
 
 /**
  * @brief Clase base para optimizadores.
@@ -158,4 +159,10 @@ private:
     Eigen::VectorXf v_biases;
 };
 
+/**
+ * @brief Muestra un menú por consola y retorna el optimizador seleccionado por el usuario.
+ */
+std::shared_ptr<Optimizer> selectOptimizer();
+
 #endif // OPTIMIZER_HPP
+

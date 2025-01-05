@@ -6,8 +6,29 @@
 #include <iostream>
 #include <random>
 #include <filesystem>
+#include <algorithm>
 
 namespace fs = std::filesystem;
+
+// Función auxiliar para calcular el mediano
+float calculateMedian(std::vector<float>& values) {
+    size_t size = values.size();
+    if (size == 0) {
+        return 0.0f;
+    }
+
+    // Copiamos los valores para no modificar el original
+    std::vector<float> sorted_values = values;
+    std::sort(sorted_values.begin(), sorted_values.end());
+
+    if (size % 2 == 1) {
+        // Si el tamaño es impar, devolver el elemento central
+        return sorted_values[size / 2];
+    } else {
+        // Si el tamaño es par, devolver el promedio de los dos elementos centrales
+        return 0.5f * (sorted_values[size / 2 - 1] + sorted_values[size / 2]);
+    }
+}
 
 void generatePositiveImages(const std::string& directory, int num_images, cv::Size image_size, int num_channels) {
     int num_gaussians = 5; // Número de gaussianos por imagen
@@ -44,7 +65,7 @@ void generatePositiveImages(const std::string& directory, int num_images, cv::Si
         // Declaramos la imagen en si
         cv::Mat image(image_size, type, background_color);
 
-        // Hack: Dibujamos círculos y luego difuminamos para pretender los gausianos
+        // Hack: Dibujamos círculos y luego difuminamos para pretender los gaussianos
         for (int j = 0; j < num_gaussians; ++j) {
             int x = dis_x(gen);
             int y = dis_y(gen);
@@ -112,8 +133,6 @@ void generateNegativeImages(const std::string& positive_directory,
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> dis(0, positive_files.size() - 1);
     std::uniform_real_distribution<float> freq_dis(min_frequency, max_frequency);
-    std::uniform_int_distribution<> pos_dis_x(0, 64);
-    std::uniform_int_distribution<> pos_dis_y(0, 64);
     std::uniform_real_distribution<float> color_dis(0.0f, 1.0f);
 
     // Creamos el directorio en caso de que no exista
@@ -131,18 +150,15 @@ void generateNegativeImages(const std::string& positive_directory,
         throw std::invalid_argument("Número de canales no soportado.");
     }
 
-    // Definimos el umbral para convertir las máscaras a binarias
-    const float mask_threshold = 0.5f;
-
     // Por cada imagen a generar...
     for (int i = 0; i < num_images; ++i) {
         // Selección de imágenes positivas
-        std::uniform_int_distribution<> dis(0, positive_files.size() - 1);
-        int idx1 = dis(gen);
-        int idx2 = dis(gen);
+        std::uniform_int_distribution<> dis_idx(0, positive_files.size() - 1);
+        int idx1 = dis_idx(gen);
+        int idx2 = dis_idx(gen);
         while (idx2 == idx1) {
             // Nos aseguramos de no agarrar dos de la misma imagen
-            idx2 = dis(gen);
+            idx2 = dis_idx(gen);
         }
 
         // Cargamos las imágenes seleccionadas
@@ -182,17 +198,50 @@ void generateNegativeImages(const std::string& positive_directory,
         std::vector<cv::Mat> masks;
         masks.reserve(num_channels);
         for (int c = 0; c < num_channels; ++c) {
-            masks.emplace_back(cv::Mat(img1.size(), CV_32F));
+            masks.emplace_back(cv::Mat(img1.size(), CV_32F, cv::Scalar(0)));
         }
 
         // Generamos las máscaras usando los generadores de ruido separados
+        // Además, recolectamos los valores de ruido para calcular el mediano
+        std::vector<std::vector<float>> noise_values(num_channels, std::vector<float>());
+        for (int c = 0; c < num_channels; ++c) {
+            noise_values[c].reserve(img1.rows * img1.cols);
+        }
+
         for (int y = 0; y < img1.rows; ++y) {
             for (int x = 0; x < img1.cols; ++x) {
                 for (int c = 0; c < num_channels; ++c) {
                     float noise_val = noise_generators[c].GetNoise(
                         static_cast<float>(x), static_cast<float>(y));
                     float normalized_val = 0.5f * (1.0f + noise_val);
-                    masks[c].at<float>(y, x) = (normalized_val > mask_threshold) ? 1.0f : 0.0f;
+                    noise_values[c].push_back(normalized_val);
+                }
+            }
+        }
+
+        // Calcular el mediano para cada canal
+        std::vector<float> median_thresholds(num_channels, 0.5f); // Valor por defecto
+        for (int c = 0; c < num_channels; ++c) {
+            median_thresholds[c] = calculateMedian(noise_values[c]);
+        }
+
+        // Ahora, generar las máscaras binarizadas usando el mediano como umbral
+        for (int c = 0; c < num_channels; ++c) {
+            cv::Mat& mask = masks[c];
+            // Aseguramos que exactamente la mitad de los píxeles sean 1 y la otra mitad 0
+            // Para ello, iteramos sobre los valores ordenados y asignamos 1 a la mitad superior
+            std::vector<float>& channel_values = noise_values[c];
+            // Crear una copia de los valores para ordenar y encontrar el umbral
+            std::vector<float> sorted_values = channel_values;
+            std::sort(sorted_values.begin(), sorted_values.end());
+            float threshold = 0.5f * (sorted_values[channel_values.size() / 2 - 1] + sorted_values[channel_values.size() / 2]);
+
+            // Aplicar el umbral
+            int idx = 0;
+            for (int y = 0; y < img1.rows; ++y) {
+                for (int x = 0; x < img1.cols; ++x) {
+                    float val = channel_values[idx++];
+                    mask.at<float>(y, x) = (val > threshold) ? 1.0f : 0.0f;
                 }
             }
         }
@@ -232,19 +281,21 @@ void generateNegativeImages(const std::string& positive_directory,
             cv::Scalar color;
 
             // Redefinimos las distribuciones para que se ajusten a los límites de la imagen.
-            std::uniform_int_distribution<> pos_dis_x(0, neg_image_8u.cols - 1);
-            std::uniform_int_distribution<> pos_dis_y(0, neg_image_8u.rows - 1);
+            std::uniform_int_distribution<> pos_dis_x_dyn(0, neg_image_8u.cols - 1);
+            std::uniform_int_distribution<> pos_dis_y_dyn(0, neg_image_8u.rows - 1);
 
             if (bias_type == "random_color_random_position") {
-                start = cv::Point(pos_dis_x(gen), pos_dis_y(gen));
-                end   = cv::Point(pos_dis_x(gen), pos_dis_y(gen));
+                start = cv::Point(pos_dis_x_dyn(gen), pos_dis_y_dyn(gen));
+                end   = cv::Point(pos_dis_x_dyn(gen), pos_dis_y_dyn(gen));
+                cv::Scalar dynamic_color;
                 for (int c = 0; c < num_channels; ++c) {
-                    color[c] = color_dis(gen) * 255;
+                    dynamic_color[c] = color_dis(gen) * 255;
                 }
+                color = dynamic_color;
             } 
             else if (bias_type == "fixed_color_random_position") {
-                start = cv::Point(pos_dis_x(gen), pos_dis_y(gen));
-                end   = cv::Point(pos_dis_x(gen), pos_dis_y(gen));
+                start = cv::Point(pos_dis_x_dyn(gen), pos_dis_y_dyn(gen));
+                end   = cv::Point(pos_dis_x_dyn(gen), pos_dis_y_dyn(gen));
                 color = fixed_color;
             } 
             else if (bias_type == "fixed_color_fixed_position") {
@@ -255,9 +306,11 @@ void generateNegativeImages(const std::string& positive_directory,
             else if (bias_type == "random_color_fixed_position") {
                 start = fixed_position;
                 end   = cv::Point(fixed_position.x + 4, fixed_position.y);
+                cv::Scalar dynamic_color;
                 for (int c = 0; c < num_channels; ++c) {
-                    color[c] = color_dis(gen) * 255;
+                    dynamic_color[c] = color_dis(gen) * 255;
                 }
+                color = dynamic_color;
             }
 
             // Clamp para asegurarnos de que la línea quede dentro de la imagen.
