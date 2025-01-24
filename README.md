@@ -987,6 +987,14 @@ Esta función orquesta todo el flujo de entrenamiento, desde la carga de datos h
 8. **C++ Compiler (GCC):**  
    GNU Compiler Collection, utilizado para compilar el código con optimizaciones de rendimiento y soporte para C++17.
 
+## Colaboración
+
+1. Documentar en español o inglés es aceptable mientras siga el estilo que ya está presente en el repositorio.
+2. Refactorizar el código para hacerlo homogeneo con el estilo de librerías estándar como PySpice o PyTorch no es aceptable. (el método forward llama a actualizar la red y no al revés)
+3. De preferencia es mejor pagar la deuda tecnológica y simplificar el código a añadir más features.
+4. Otra forma de colaborar es crear un informe de la versión del código, las especificaciones de la máquina y el tiempo en ejecutar el código. Otras formas de colaborar perfilando el código son, usar perf para identificar cuellos de botella, identificar segmentos muertos de código.
+5. El multithreading se encuentra comentado por problemas asociados a paralelizar externamente a Eigen (pues este parece tener su manejo de múltiples hilos ya integrado).
+
 ## TODO
 
 1. Implementar cargado de modelos para resumir el entrenamiento de un modelo memorablemente bueno con el mismo conjunto de datos, o usar otro conjunto similar.
